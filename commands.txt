@@ -1,0 +1,7 @@
+TO CREATE A BUILD:
+CMD: pyinstaller --onefile --noconsole --icon=setup.ico --add-data "setup.ico;." --add-data "index.html;." --add-data "splash.png;." --add-data "assets;assets" main.py
+
+TO RUN AT LOCAL:
+CMD: python .\main.py
+
+
