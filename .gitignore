@@ -2,4 +2,6 @@
 .idea/
 dist/
 build/
+Output/
+
 __pycache__/
