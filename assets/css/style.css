@@ -1,0 +1,721 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden; /* Prevent scroll during splash */
+}
+
+#dashboard_content{
+    position: relative
+}
+
+#dashboard_content #open_in_web{
+    position: absolute;
+    top: 10px;
+    right: 45px;
+}
+
+
+
+#splash-screen {
+  position: fixed;
+  z-index: 9999;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #ffffff; /* Make sure it's not transparent */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 1;
+  transition: opacity 0.4s ease;
+}
+
+#splash-screen.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#splash-screen img {
+  max-width: 150px;
+  height: auto;
+}
+
+
+ #loginPage {
+     display: none;
+    /* Hide main page until loader finishes */
+}
+ #loginPage{
+    /*max-width: 76%;
+     margin: 0 auto;
+    */
+     background-color: #fff;
+}
+ #loginPage .login-form-content{
+     text-align: center;
+}
+ #loginPage .login-form-content .heading h1{
+     font-family: fantasy;
+     font-size: 5rem;
+}
+ #loginPage .login-form-content .heading p{
+     font-size: 2rem;
+}
+ #loginPage .form-check-input:checked {
+     background-color: #21a78e;
+     border-color: #21a78e;
+}
+ #loginPage .form-check-input {
+     border-color: #21a78e;
+}
+ #loginPage .form-check-input:focus{
+     box-shadow: unset;
+}
+ #loginPage .login-form-content .btn{
+     background-color: #002e34;
+     border-color: #002e34;
+     font-size: 1.5rem;
+     padding: 2px 15px;
+     font-weight: 700;
+}
+ #loginPage .login-form-content .link a{
+     color: #21a78e;
+}
+ #loginPage .login-form-content .forget-link{
+     color: #000;
+     text-decoration: none;
+}
+ #loginPage .login-screen-img{
+    position: relative
+}
+
+#loginPage .login-screen-img #app_version{
+    position: absolute;
+    bottom: -10px;
+    left: 10px;
+    font-size: 14px;
+    font-weight: bold;
+    color: #929292;
+}
+ :root {
+     --primary-color: #3498db;
+     --border-color: #ddd;
+     --focus-color: #2980b9;
+}
+ body {
+     font-family: 'Arial', sans-serif;
+     overflow:hidden;
+     width: 1092px;
+     height: 700px;
+     margin: 0 auto;
+}
+ .form-container {
+     background: white;
+     padding: 40px;
+     border-radius: 8px;
+     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+     width: 100%;
+     max-width: 400px;
+}
+ .input-group {
+     position: relative;
+     margin-bottom: 25px;
+}
+ .input-icon {
+     position: absolute;
+     left: 15px;
+     top: 50%;
+     transform: translateY(-50%);
+     color: #21a78e;
+     transition: all 0.3s;
+     width: 12%;
+     padding: 0px 8px;
+}
+ .input-icon.lock {
+     padding: 0px 13px;
+}
+ .form-input {
+     width: 100%;
+     padding: 20px 26px 20px 80px;
+     border: 2px solid var(--border-color);
+     border-radius: 6px;
+     font-size: 16px;
+     transition: all 0.3s;
+     background: #ecedef;
+     border-radius: 36px !important;
+}
+ .form-input:focus {
+     border-color: var(--primary-color);
+     outline: none;
+     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+}
+ .form-input:focus + .input-icon {
+     color: var(--primary-color);
+}
+ .submit-btn {
+     background-color: var(--primary-color);
+     color: white;
+     border: none;
+     padding: 12px 20px;
+     border-radius: 6px;
+     font-size: 16px;
+     font-weight: 600;
+     width: 100%;
+     cursor: pointer;
+     transition: background-color 0.3s;
+}
+ .submit-btn:hover {
+     background-color: var(--focus-color);
+}
+ .password-toggle {
+     position: absolute;
+     right: 25px;
+     top: 50%;
+     transform: translateY(-50%);
+     cursor: pointer;
+     color: #21a68d;
+     font-size: 1.5rem;
+}
+ .password-toggle:hover {
+     color: #333;
+}
+ #loginPage .login-form-content{
+     margin: 54px 35px 0px 35px;
+}
+/* dashboard styling below */
+ #dashboard{
+    position: relative;
+    /*background-color: red;
+    */
+}
+ #dashboard nav.navigations{
+     background-color: #efefef;
+     padding: 25px 35px;
+     border-bottom: 7px solid #000;
+}
+ #dashboard .main-logo img{
+}
+
+#dashboard .nav-links ul li #profile{
+    height: 62px;
+    width: 110px;
+    display: block;
+    object-fit: cover;
+    object-position: center;
+}
+
+ #dashboard .nav-links ul{
+     display: flex;
+     align-items: center;
+     justify-content: flex-end;
+     margin-bottom: 0px;
+}
+ #dashboard .nav-links ul li{
+     border-right:2px solid #000;
+     text-align: center;
+}
+ #dashboard .nav-links ul li:first-child{
+    /*border-right:unset;
+    */
+}
+ #dashboard .nav-links ul li:last-child{
+     border-right:unset;
+}
+ #dashboard .nav-links ul li{
+     list-style-type: none;
+     width: 17%;
+}
+ #dashboard .nav-links ul li img{
+     width: 35%;
+     border-radius: 50%;
+}
+ #dashboard .nav-links ul li .avatar{
+     width: 60%;
+}
+ #dashboard .content {
+     /*padding: 50px 10px;*/
+     padding: 40px 10px 18px 10px;
+     max-width: 60%;
+}
+
+
+
+ #dashboard .content .user-info .name-heading{
+     font-weight: bolder;
+     color: #1ca38b;
+}
+}
+ #dashboard .content .user-info .shift-heading{
+     margin-top: 20px;
+     font-weight: bold;
+     font-size: 32px;
+}
+ #dashboard .content .user-info .shift-time{
+     font-size: 20px;
+     margin-bottom: 8px;
+}
+ #dashboard .content .user-info-content{
+     text-align: center;
+}
+ #dashboard .content .user-info-content .break-actions img{
+     margin: 5px;
+     width: 20%;
+     cursor: pointer;
+}
+ #dashboard footer{
+     background: #1ca38b;
+}
+ #dashboard footer p{
+     padding: 10px;
+     text-align: center;
+     color:#fff;
+     font-size: 18px;
+     margin-bottom: 0px;
+}
+
+#dashboard .circle.active {
+  background-color: red; /* or any highlighted color */
+  /*box-shadow: 0 0 10px #0aebc1;*/
+  transition: all 0.3s ease;
+}
+ #dashboard .progress-container {
+     display: flex;
+     align-items: center;
+     justify-content: center;
+     margin-bottom: 30px;
+}
+ #dashboard .step {
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+     position: relative;
+     flex: 1;
+}
+ #dashboard .circle {
+     width: 30px;
+     height: 30px;
+     background-color: #1ca38b;
+     border-radius: 50%;
+     position: relative;
+     z-index: 1;
+}
+ #dashboard .progress-container .step:first-child .circle {
+     background-color: #002e34;
+}
+ #dashboard .label {
+     text-align: center;
+}
+ #dashboard .label h1{
+     margin-top: 8px;
+     font-size: 30px;
+     font-weight: bold;
+     margin-bottom: 0;
+}
+ #dashboard .label p{
+     font-size: 23px;
+     margin-bottom: 0;
+}
+ #dashboard .line {
+     position: absolute;
+     top: 15px;
+     left: 50%;
+     width: 100%;
+     height: 4px;
+     background-color: #ccc;
+     z-index: 0;
+}
+ #dashboard .step:not(:last-child)::after {
+     content: '';
+     position: absolute;
+     top: 15px;
+     right: -50%;
+     width: 100%;
+     height: 4px;
+     background-color: #1ca38b;
+     z-index: 0;
+}
+ #dashboard .content .timer{
+     width: 262px;
+     height: 273px;
+     background-image: url(../images/empty-timer.png);
+     background-repeat: no-repeat;
+     background-position: center center;
+     background-size: contain;
+    /* or 'cover' depending on your need */
+     position: relative;
+     z-index: 0;
+}
+ #dashboard .content .timer #time{
+     font-weight: 700;
+     font-size: 3.5rem;
+}
+ #dashboard .content .timer p{
+     font-weight: 700;
+     font-size: 3.0rem;
+}
+ #dashboard .content .timer-content{
+     position: absolute;
+     top: 50%;
+     left: 50%;
+     transform: translate(-50%, -50%);
+}
+ .logs-tbl{
+}
+ .break-log-wrapper{
+    text-align: center;
+    border: 2px solid #002f34;
+    margin: 28px 60px;
+    border-radius: 20px;
+    padding: 15px 15px 16px 15px;
+}
+
+.break-log-wrapper .content-log{
+    max-height: 268px;
+    min-height: 268px;
+    overflow-y: auto;
+}
+ .break-log-wrapper .content-log table, td, th {
+     text-align: left;
+}
+ .break-log-wrapper .content-log table thead th:last-child, .break-log-wrapper .content-log table tbody td:last-child {
+     border-left: 1px solid #9b9b9b;
+}
+ .break-log-wrapper .content-log table thead th:first-child, .break-log-wrapper .content-log table tbody td:first-child {
+     border-right: 1px solid #9b9b9b;
+}
+ .break-log-wrapper .content-log table tr {
+     border-bottom: 1px solid #9b9b9b;
+}
+ .break-log-wrapper .content-log table {
+     border-collapse: collapse;
+     width: 85%;
+     margin: 0 auto;
+}
+ .break-log-wrapper .content-log th, td {
+     padding: 9px;
+}
+ .break-log-wrapper .heading{
+     text-align: center;
+     font-weight: bold;
+     color: #1cae93;
+     border-bottom: 2px solid;
+     display: inline-block;
+     margin-bottom: 20px;
+}
+ .break-log-wrapper .logs-pagination .pagination{
+     margin-top: 10px;
+     justify-content: center;
+     margin-bottom: 0;
+}
+
+.break-log-wrapper .logs-pagination .pagination .page-item.active a{
+    background-color: #efefef;
+    border: 1px solid #ddd;
+}
+
+#notifications_content .wrapper,
+#settings_content .wrapper,
+#profile_content .wrapper{
+	height: 71.7vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#dashboard .back-btn{
+    padding: 3px 4px;
+    background: #efefef;
+    border-radius: 50%;
+    color: #fff;
+    position: absolute;
+    top: 150px;
+    left: 16px;
+    cursor: pointer;
+    border: 1px solid #cacaca;
+}
+
+#notifications_content .wrapper .heading,
+#settings_content .wrapper .heading,
+#profile_content .wrapper .heading{
+	font-weight: bold;
+	font-size: 30px;
+}
+ .break-log-wrapper .logs-pagination .pagination li a.page-link{
+     font-size: 13px !important;
+}
+ .break-log-wrapper .logs-pagination .pagination li:first-child{
+     margin-right:130px;
+}
+ .break-log-wrapper .logs-pagination .pagination li:last-child{
+     margin-left:130px;
+}
+ .break-log-wrapper .logs-pagination .pagination li:first-child a.page-link, .break-log-wrapper .logs-pagination .pagination li:last-child a.page-link{
+     background-color: white !important;
+     border: 1px solid #ddd !important;
+     color:#5d5c5c;
+}
+ .break-log-wrapper .logs-pagination .pagination li:not(first-child) a.page-link, .break-log-wrapper .logs-pagination .pagination li:not(last-child) a.page-link{
+     background-color: #fff;
+     color: #5d5c5c;
+     border-radius: 10px;
+     border: 0px solid #f9f9f9;
+     font-size: 13px !important;
+}
+ .break-log-wrapper .logs-pagination .pagination li:not(first-child) a.page-link:hover, .break-log-wrapper .logs-pagination .pagination li:not(last-child) a.page-link:hover{
+     background-color: #eae9e9;
+}
+
+.break-log-wrapper .logs-pagination .pagination pare-item.active{
+    background-color: #eae9e9;
+}
+ .break-log-wrapper .logs-pagination .pagination li a.page-link.active{
+     background-color: #f9f9f9;
+}
+ .break-log-wrapper .logs-pagination .pagination li a.page-link.ignore{
+     background-color: #fff !important;
+}
+ .break-log-wrapper .logs-pagination .pagination li:not(first-child), .break-log-wrapper .logs-pagination .pagination li:not(last-child){
+     padding:0px 5px;
+}
+ .break-wrapper{
+     position: relative;
+     background: #ebeeef;
+     border-radius: 36px;
+}
+
+#breakModal .modal-content,
+#inactivityModal .modal-content{
+    border-radius: 36px;
+}
+
+ .break-wrapper .break-type-wrapper h1{
+     font-weight: bold;
+     color: #1ca38b;
+     font-size: 2rem;
+     border-bottom: 2px solid #1ca38b;
+     display: inline-block;
+}
+ .break-wrapper .break-type-wrapper{
+     padding: 24px 40px;
+}
+ .break-wrapper select {
+     width: 100%;
+     padding: 8px 30px 8px 0;
+     background: transparent url('data:image/svg+xml;utf8,<svg fill="black" height="16" viewBox="0 0 24 24" width="16" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/></svg>') no-repeat right center;
+     background-size: 16px;
+     border: none;
+     border-bottom: 2px solid #002e34;
+     font-size: 20px;
+     outline: none;
+     appearance: none;
+     -webkit-appearance: none;
+     -moz-appearance: none;
+     cursor: pointer;
+     color: #1ca38b;
+}
+ .break-wrapper textarea {
+     width: 100%;
+     padding: 10px;
+     background-color: #f7f7f7;
+     border: none;
+     border-radius: 4px;
+     font-size: 16px;
+     resize: vertical;
+     min-height: 80px;
+     outline: none;
+     margin-top: 10px;
+     border-radius: 10px;
+     resize: none;
+}
+
+#login_error, #ip_not_register{
+    font-size: 12px;
+    margin-bottom: 19px;
+}
+ .break-wrapper button {
+     width: 40%;
+     padding: 0px;
+     background-color: #000;
+     color: #fff;
+     border: none;
+     border-radius: 4px;
+     font-size: 14px;
+     cursor: pointer;
+     transition: background 0.3s ease;
+     float: right;
+}
+ .break-wrapper button:hover {
+     background-color: #333;
+}
+ .break-wrapper .break-logo-wrapper{
+     position: relative;
+}
+ .break-wrapper .break-logo-wrapper .cross-icon{
+     position: absolute;
+     top:-10px;
+     right:-10px;
+     cursor: pointer;
+     width: 35px;
+}
+ .break-wrapper::before{
+     content: "";
+     height: 20px;
+     width: 100px;
+     background: #ebeeef;
+     position: absolute;
+     left: 190px;
+     border-radius: 5px;
+     top: -17px;
+}
+ .tasks-wrapper {
+     position: relative;
+     text-align: center;
+     padding: 26px 40px;
+}
+ .tasks-wrapper .cross-icon{
+     position: absolute;
+     right: -50px;
+     top: -32px;
+     cursor: pointer;
+     width: 35px;
+}
+ .tasks-wrapper button {
+     width: 100%;
+     padding: 2px;
+     background-color: #002f34;
+     color: #fff;
+     border: none;
+     border-radius: 4px;
+     font-size: 21px;
+     cursor: pointer;
+     transition: background 0.3s ease;
+     margin-top: 20px;
+}
+ .timer{
+     padding: 22px 40px;
+}
+ .timer .timer-container {
+     position: relative;
+     width: 200px;
+     height: 200px;
+     top: 21px;
+     left: -2px;
+}
+ .timer .tick {
+     position: absolute;
+     width: 5px;
+     height: 12px;
+     background-color: #ddd;
+     top: 0;
+     left: 50%;
+     transform-origin: center 95px;
+     border-radius: 3px;
+     transition: background-color 0.3s ease;
+}
+ .timer .tick.active {
+     background-color: #00c9b7;
+}
+ .timer .center-label {
+     position: absolute;
+     top: 40%;
+     left: 50%;
+     transform: translate(-50%, -50%);
+     text-align: center;
+     line-height: 0.5;
+}
+ .timer .center-label h1 {
+     margin: 0;
+     font-size: 30px;
+     color: #062c33;
+}
+ .timer .center-label p {
+     margin: 0;
+     font-size: 14px;
+     color: #062c33;
+}
+
+/* Confirm button */
+  .swal2-confirm {
+    background-color: #21a78e !important;
+    border: none !important;
+  }
+
+  /* Popup title */
+  .custom-swal-popup .swal2-title {
+    color: #141619;
+  }
+
+  /* Text inputs and textarea */
+  .custom-swal-popup .swal2-input,
+  .custom-swal-popup .swal2-textarea {
+    border: 1px solid #21a78e;
+    border-radius: 6px;
+  }
+
+  span.swal2-label {
+    font-size: 10px;
+    font-weight: bold;
+  }
+
+  /* Radio labels spacing */
+  .custom-swal-popup .swal2-radio label {
+    margin-left: 6px;
+    font-weight: 500;
+  }
+
+  /* Selected radio color */
+  .custom-swal-popup input[type="radio"]:checked {
+    accent-color: #21a78e;
+  }
+
+  /* Optional: hover effect */
+  .custom-swal-popup input[type="radio"]:hover {
+    cursor: pointer;
+  }
+
+.timer-content .timer-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            top: 21px;
+            left: -2px;
+        }
+
+        .timer-content .tick {
+            position: absolute;
+            width: 5px;
+            height: 12px;
+            background-color: #ddd;
+            top: 0;
+            left: 50%;
+            transform-origin: center 95px;
+            border-radius: 3px;
+            transition: background-color 0.3s ease;
+        }
+
+        .timer-content .tick.active {
+            background-color: #00c9b7;
+        }
+
+        .timer-content .center-label {
+            position: absolute;
+            top: 40%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            line-height: 0.5;
+        }
+
+        .timer-content .center-label h1 {
+            margin: 0;
+            font-size: 30px;
+            color: #062c33;
+        }
+
+        .timer-content .center-label p {
+            margin: 0;
+            font-size: 14px;
+            color: #062c33;
+        }

@@ -1,6 +1,8 @@
 TO CREATE A BUILD:
 CMD: pyinstaller --onefile --noconsole --icon=setup.ico --add-data "setup.ico;." --add-data "index.html;." --add-data "splash.png;." --add-data "assets;assets" main.py
 
+CMD: pyinstaller --onedir --noconsole --icon=setup.ico --name=WorkTre --hidden-import=plyer.platforms.win.notification --add-data "setup.ico;." --add-data "index.html;." --add-data "splash.png;." --add-data "assets;assets" --add-data "version.txt;." --add-data "icon.ico;." main.py
+
 TO RUN AT LOCAL:
 CMD: python .\main.py
 

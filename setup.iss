@@ -6,17 +6,24 @@ AppName={#MyAppName}
 AppVersion={#AppVersion}
 AppID={#MyAppName}App
 AppPublisher=Bioncos Global - IT Solutions
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany=Bioncos Global - IT Solutions
+VersionInfoDescription=WorkTre Desktop Application
+VersionInfoCopyright=Copyright © 2025 Bioncos Global
+VersionInfoProductName=WorkTre
+VersionInfoProductVersion={#AppVersion}
+VersionInfoProductTextVersion={#AppVersion}
 AppPublisherURL=https://personalcompany.example.com
 AppSupportURL=https://personalcompany.example.com/support
 AppUpdatesURL=https://personalcompany.example.com/updates
 DefaultDirName={localappdata}\{#MyAppName}
 DefaultGroupName={#MyAppName}
-OutputBaseFilename={#MyAppName}_v{#AppVersion}
+OutputBaseFilename={#MyAppName}Setup-{#AppVersion}
 Compression=lzma
 SolidCompression=yes
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\WorkTre.exe
-SetupIconFile=dist\WorkTre\icon.ico
+SetupIconFile=dist\WorkTre\setup.ico
 
 [Files]
 Source: "dist\WorkTre\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion

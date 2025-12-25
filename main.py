@@ -23,7 +23,7 @@ from system_monitor import start_monitor
 # === Single Instance Lock ===
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
 
-APPDATA = os.path.join(os.environ.get("APPDATA", "."), "WorkTree")
+APPDATA = os.path.join(os.environ.get("APPDATA", "."), "WorkTre")
 os.makedirs(APPDATA, exist_ok=True)
 
 # Save important files inside APPDATA path
@@ -86,7 +86,7 @@ url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
 def get_key_path():
     # Get a safe writable directory
-    base_dir = os.path.expanduser("~\\AppData\\Roaming\\WorkTree")
+    base_dir = os.path.expanduser("~\\AppData\\Roaming\\WorkTre")
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, "remember_me.key")
 
