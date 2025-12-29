@@ -1,5 +1,5 @@
 #define MyAppName "WorkTre"
-#define AppVersion "1.2.1"
+#define AppVersion "2.0.1"
 
 [Setup]
 AppName={#MyAppName}
