@@ -25,7 +25,7 @@ from packaging import version
 #format: major.minor.build.revision
 APP_VERSION = "2.0.1"
 
-UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
+UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/refs/heads/main/version.json"
 
 def install_update(installer_path):
     subprocess.Popen(installer_path)
