@@ -10,9 +10,9 @@ html, body {
 }
 
 #dashboard_content #open_in_web{
-    position: absolute;
+    /*position: absolute;
     top: 10px;
-    right: 45px;
+    right: 45px;*/
 }
 
 
@@ -56,13 +56,24 @@ html, body {
  #loginPage .login-form-content{
      text-align: center;
 }
+#loginPage .heading {
+    position: relative;
+    top: 72px;
+}
  #loginPage .login-form-content .heading h1{
-     font-family: fantasy;
+     /*font-family: fantasy;*/
      font-size: 5rem;
+     margin-bottom: -0.9rem;
 }
  #loginPage .login-form-content .heading p{
      font-size: 2rem;
 }
+
+.form-body {
+    position: relative;
+    top: 100px;
+}
+
  #loginPage .form-check-input:checked {
      background-color: #21a78e;
      border-color: #21a78e;
@@ -76,9 +87,9 @@ html, body {
  #loginPage .login-form-content .btn{
      background-color: #002e34;
      border-color: #002e34;
-     font-size: 1.5rem;
-     padding: 2px 15px;
-     font-weight: 700;
+     font-size: 1.2rem;
+     padding: 0px 14px 1px;
+     font-weight: 500;
 }
  #loginPage .login-form-content .link a{
      color: #21a78e;
@@ -91,13 +102,20 @@ html, body {
     position: relative
 }
 
+.ls-width {
+    width: 100%;
+    /*object-fit: cover;
+    width: -webkit-fill-available;*/
+}
+
 #loginPage .login-screen-img #app_version{
     position: absolute;
-    bottom: -10px;
+    bottom: 0px;
     left: 10px;
-    font-size: 14px;
+    font-size: 12px !important;
     font-weight: bold;
-    color: #929292;
+    color: rgb(0 47 52);
+    font: menu;
 }
  :root {
      --primary-color: #3498db;
@@ -105,10 +123,10 @@ html, body {
      --focus-color: #2980b9;
 }
  body {
-     font-family: 'Arial', sans-serif;
+     /*font-family: 'Arial', sans-serif;*/
      overflow:hidden;
      width: 1092px;
-     height: 700px;
+     height: 650px;
      margin: 0 auto;
 }
  .form-container {
@@ -122,24 +140,25 @@ html, body {
  .input-group {
      position: relative;
      margin-bottom: 25px;
+     width: 95%;
 }
  .input-icon {
      position: absolute;
      left: 15px;
-     top: 50%;
+     top: 47%;
      transform: translateY(-50%);
      color: #21a78e;
      transition: all 0.3s;
      width: 12%;
-     padding: 0px 8px;
+     padding: 0px 14px;
 }
  .input-icon.lock {
-     padding: 0px 13px;
+     padding: 0px 16px;
 }
  .form-input {
      width: 100%;
-     padding: 20px 26px 20px 80px;
-     border: 2px solid var(--border-color);
+     padding: 14px 23px 14px 80px;
+     border: 0px solid var(--border-color);
      border-radius: 6px;
      font-size: 16px;
      transition: all 0.3s;
@@ -176,13 +195,25 @@ html, body {
      transform: translateY(-50%);
      cursor: pointer;
      color: #21a68d;
-     font-size: 1.5rem;
+     font-size: 1.2rem;
 }
  .password-toggle:hover {
      color: #333;
 }
+
+.link-f {
+    font-size: 13px;
+}
+
  #loginPage .login-form-content{
-     margin: 54px 35px 0px 35px;
+     /*margin: 54px 35px 0px 35px;*/
+     margin: 9px 32px 0px;
+}
+
+.form-bottom-img {
+    position: relative;
+    bottom: -50px;
+    left: -24px;
 }
 /* dashboard styling below */
  #dashboard{
@@ -192,9 +223,14 @@ html, body {
 }
  #dashboard nav.navigations{
      background-color: #efefef;
-     padding: 25px 35px;
+     padding: 10px 35px;
      border-bottom: 7px solid #000;
 }
+
+#dashboard .main-logo {
+    padding: 10px 0px;
+}
+
  #dashboard .main-logo img{
 }
 
@@ -212,6 +248,13 @@ html, body {
      justify-content: flex-end;
      margin-bottom: 0px;
 }
+
+#dashboard .nav-links .label-txt {
+    font: menu;
+    font-weight: bold;
+    padding-top: 5px;
+}
+
  #dashboard .nav-links ul li{
      border-right:2px solid #000;
      text-align: center;
@@ -228,11 +271,12 @@ html, body {
      width: 17%;
 }
  #dashboard .nav-links ul li img{
-     width: 35%;
+     width: 27%;
      border-radius: 50%;
 }
  #dashboard .nav-links ul li .avatar{
      width: 60%;
+     border: 2px solid #002f34;
 }
  #dashboard .content {
      /*padding: 50px 10px;*/
@@ -240,13 +284,11 @@ html, body {
      max-width: 60%;
 }
 
-
-
  #dashboard .content .user-info .name-heading{
      font-weight: bolder;
      color: #1ca38b;
 }
-}
+
  #dashboard .content .user-info .shift-heading{
      margin-top: 20px;
      font-weight: bold;
@@ -268,11 +310,26 @@ html, body {
      background: #1ca38b;
 }
  #dashboard footer p{
-     padding: 10px;
+     padding: 4px;
      text-align: center;
      color:#fff;
-     font-size: 18px;
+     font-size: 14px;
      margin-bottom: 0px;
+}
+
+.user-name-heading {
+  display: flex;
+  align-items: center;   /* vertically align h1 and svg */
+  gap: 12px;             /* space between text and icon */
+}
+
+.name-heading {
+  margin: 0;             /* remove default h1 margin */
+}
+
+#open_in_web svg {
+  display: block;        /* remove inline svg spacing */
+  cursor: pointer;
 }
 
 #dashboard .circle.active {
@@ -494,7 +551,7 @@ html, body {
      font-weight: bold;
      color: #1ca38b;
      font-size: 2rem;
-     border-bottom: 2px solid #1ca38b;
+     /*border-bottom: 2px solid #1ca38b;*/
      display: inline-block;
 }
  .break-wrapper .break-type-wrapper{
@@ -507,7 +564,7 @@ html, body {
      background-size: 16px;
      border: none;
      border-bottom: 2px solid #002e34;
-     font-size: 20px;
+     /*font-size: 20px;*/
      outline: none;
      appearance: none;
      -webkit-appearance: none;
@@ -563,7 +620,7 @@ html, body {
      content: "";
      height: 20px;
      width: 100px;
-     background: #ebeeef;
+     /*background: #ebeeef;*/
      position: absolute;
      left: 190px;
      border-radius: 5px;
@@ -676,46 +733,57 @@ html, body {
   }
 
 .timer-content .timer-container {
-            position: relative;
-            width: 200px;
-            height: 200px;
-            top: 21px;
-            left: -2px;
-        }
+    position: relative;
+    width: 200px;
+    height: 200px;
+    top: 21px;
+    left: -2px;
+}
 
-        .timer-content .tick {
-            position: absolute;
-            width: 5px;
-            height: 12px;
-            background-color: #ddd;
-            top: 0;
-            left: 50%;
-            transform-origin: center 95px;
-            border-radius: 3px;
-            transition: background-color 0.3s ease;
-        }
+.timer-content .tick {
+    position: absolute;
+    width: 5px;
+    height: 12px;
+    background-color: #ddd;
+    top: 0;
+    left: 50%;
+    transform-origin: center 95px;
+    border-radius: 3px;
+    transition: background-color 0.3s ease;
+}
 
-        .timer-content .tick.active {
-            background-color: #00c9b7;
-        }
+.timer-content .tick.active {
+    background-color: #00c9b7;
+}
 
-        .timer-content .center-label {
-            position: absolute;
-            top: 40%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            line-height: 0.5;
-        }
+.timer-content .center-label {
+    position: absolute;
+    top: 40%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    line-height: 0.5;
+}
 
-        .timer-content .center-label h1 {
-            margin: 0;
-            font-size: 30px;
-            color: #062c33;
-        }
+.timer-content .center-label h1 {
+    margin: 0;
+    font-size: 30px;
+    color: #062c33;
+}
 
-        .timer-content .center-label p {
-            margin: 0;
-            font-size: 14px;
-            color: #062c33;
-        }
+.timer-content .center-label p {
+    margin: 0;
+    font-size: 14px;
+    color: #062c33;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between; /* left & right */
+  align-items: center;
+  padding: 0px 27px 0px 27px;
+}
+
+footer p {
+  margin: 0; /* remove default spacing */
+}

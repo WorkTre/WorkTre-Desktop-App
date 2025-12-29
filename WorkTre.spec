@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('setup.ico', '.'), ('index.html', '.'), ('splash.png', '.'), ('assets', 'assets'), ('version.txt', '.'), ('icon.ico', '.')],
+    datas=[('icon.ico', '.'), ('index.html', '.'), ('splash.png', '.'), ('assets', 'assets'), ('version.txt', '.'), ('icon.ico', '.')],
     hiddenimports=['plyer.platforms.win.notification'],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +32,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['setup.ico'],
+    icon=['icon.ico'],
 )
 coll = COLLECT(
     exe,

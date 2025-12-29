@@ -1,6 +1,7 @@
 from inactivity_manager import start_inactivity_timer, stop_inactivity_timer, reset_idle_timer
 from connectivity_monitor import start_connectivity_monitor
 import webview
+import tkinter as tk
 import sys
 import os
 import logging
@@ -1305,15 +1306,15 @@ def set_window_icon():
         # Only works for tkinter GUI
         if window.gui == 'tkinter':
             tk_window = window.gui.window
-            icon_path = resource_path('desktop.ico')
+            icon_path = resource_path('icon.ico')
 
             if os.path.exists(icon_path):
                 tk_window.iconbitmap(icon_path)
 
             # Set fixed window size
             tk_window.resizable(False, False)
-            tk_window.maxsize(1092, 700)
-            tk_window.minsize(1092, 700)
+            tk_window.maxsize(1092, 650)
+            tk_window.minsize(1092, 650)
 
         else:
             logger.info(f"Skipping icon/resizing: GUI backend '{window.gui}' doesn't support it.")
@@ -1334,11 +1335,27 @@ def start_app(api, html_file):
 
     start_monitor()
 
+    # Get screen dimensions for centering
+    root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.destroy()  # Close the temporary tkinter window
+
+    # Set your fixed window dimensions
+    window_width = 1092
+    window_height = 650
+
+    # Calculate center position
+    left = (screen_width - window_width) // 2
+    top = (screen_height - window_height) // 2
+
     current_window = webview.create_window(
         title='WorkTre',
         url=f'file://{html_path}',
-        width=1092,
-        height=700,
+        width=window_width,
+        height=window_height,
+        x=left,  # Add X position
+        y=top,  # Add Y position
         js_api=api,
         resizable=False,
         confirm_close=True
@@ -1346,36 +1363,44 @@ def start_app(api, html_file):
 
     logging.info("started")
 
-
-
     webview.start(debug=False, gui='edgechromium', func=set_window_icon)
-
 
 def inactivity_window(api, html_file):
     global current_window
 
     html_path = resource_path(html_file)
 
-
-
     if not os.path.exists(html_path):
         logger.error(f"{html_file} not found!")
         sys.exit(1)
 
+    # Get screen dimensions for centering
+    root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    root.destroy()  # Close the temporary tkinter window
+
+    # Set your fixed window dimensions
+    window_width = 600
+    window_height = 500
+
+    # Calculate center position
+    left = (screen_width - window_width) // 2
+    top = (screen_height - window_height) // 2
+
     current_window = webview.create_window(
         title='WorkTre',
         url=f'file://{html_path}',
-        width=600,
-        height=500,
+        width=window_width,
+        height=window_height,
+        x=left,  # Add X position
+        y=top,  # Add Y position
         js_api=api,
         minimized=False
     )
 
     # You can change 'edgechromium' to 'tkinter' here if needed
     webview.start(debug=False, gui='edgechromium', func=set_window_icon)
-
-
-
 
 # ---------------------- Entry Point ----------------------
 if __name__ == '__main__':
