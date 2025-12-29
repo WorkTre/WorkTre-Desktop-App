@@ -2,6 +2,7 @@ from inactivity_manager import start_inactivity_timer, stop_inactivity_timer, re
 from connectivity_monitor import start_connectivity_monitor
 import webview
 import tkinter as tk
+import subprocess
 import sys
 import os
 import logging
@@ -25,6 +26,9 @@ APP_VERSION = "2.0.1"
 
 UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
 
+def install_update(installer_path):
+    subprocess.Popen(installer_path)
+    sys.exit()
 
 def check_for_updates():
     try:

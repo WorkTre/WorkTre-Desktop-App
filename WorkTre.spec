@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.ico', '.'), ('index.html', '.'), ('splash.png', '.'), ('assets', 'assets'), ('version.txt', '.'), ('icon.ico', '.')],
+    datas=[('setup.ico', '.'), ('index.html', '.'), ('splash.png', '.'), ('assets', 'assets'), ('version.txt', '.'), ('icon.ico', '.')],
     hiddenimports=['plyer.platforms.win.notification'],
     hookspath=[],
     hooksconfig={},
