@@ -19,7 +19,40 @@ import shutil
 import xml.etree.ElementTree as ET
 from cryptography.fernet import Fernet
 from system_monitor import start_monitor
+from packaging import version
 
+APP_VERSION = "2.0.1"
+
+UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
+
+
+def check_for_updates():
+    try:
+        response = requests.get(UPDATE_URL, timeout=5)
+        response.raise_for_status()
+
+        data = response.json()
+        remote_version = data["version"]
+        download_url = data["download_url"]
+
+        if version.parse(remote_version) > version.parse(APP_VERSION):
+            return {
+                "update": True,
+                "latest_version": remote_version,
+                "download_url": download_url
+            }
+
+    except Exception as e:
+        print("Update check failed:", e)
+
+    return {"update": False}
+
+
+update_info = check_for_updates()
+
+if update_info["update"]:
+    print("Update available:", update_info["latest_version"])
+    # pass info to frontend or show popup
 
 # === Single Instance Lock ===
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
@@ -48,9 +81,8 @@ logged_in_user_info = None
 interval_timer = None
 interval_lock = threading.Lock()
 repeat_interval_seconds = 0  # To store and reuse duration
-is_running = False           # Track whether timer is active
+is_running = False  # Track whether timer is active
 app_version = None
-
 
 try:
     lock_handle = open(LOCK_FILE, 'w')
@@ -59,6 +91,7 @@ try:
 except portalocker.exceptions.LockException:
     sys.exit(0)
 
+
 def cleanup_temp_dir():
     temp_path = os.path.join(os.getcwd(), 'webview_temp')
     try:
@@ -66,7 +99,9 @@ def cleanup_temp_dir():
     except Exception:
         pass
 
+
 cleanup_temp_dir()
+
 
 def get_dynamic_ip():
     try:
@@ -83,6 +118,8 @@ def get_dynamic_ip():
 
 
 url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+
+
 # ---------------------- Your JS API ----------------------
 
 def get_key_path():
@@ -91,10 +128,10 @@ def get_key_path():
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, "remember_me.key")
 
+
 def load_key():
     try:
         key_path = get_key_path()  # ✅ This ensures we use AppData path
-
 
         if not os.path.exists(key_path):
             key = Fernet.generate_key()
@@ -110,8 +147,10 @@ def load_key():
         print("[ERROR] Failed to load or create key:", e)
         return None
 
+
 # Load it on start
 fernet = load_key()
+
 
 def save_remembered_user(email, password):
     try:
@@ -130,6 +169,7 @@ def save_remembered_user(email, password):
             logger.info("Remembered user file deleted.")
     except Exception as e:
         logger.error(f"Error saving remembered user: {e}")
+
 
 def get_remembered_user():
     try:
@@ -152,15 +192,11 @@ def on_warning():
         with open("warn.log", "a", encoding="utf-8") as f:
             f.write(f"Error showing modal: {e}\n")
 
+
 def on_exit():
     if webview.windows:
         webview.windows[0].evaluate_js("inactivityTimeExceed()")
         API.clear_app_data()
-
-
-
-
-
 
 
 # ************************** crash inactivity timer *************************
@@ -168,11 +204,9 @@ def on_exit():
 def on_interval_complete():
     global interval_timer, is_running, logged_in_user_info
 
-
     with interval_lock:
         interval_timer = None
         if is_running and repeat_interval_seconds > 0:
-
 
             if logged_in_user_info is not None:
                 API.lastactivitydate(logged_in_user_info["EID"], "False", "", "")
@@ -235,8 +269,6 @@ class API:
         self._kick_after = None
         self._warned = False
         self.app_version = None
-
-
 
         self.maximum_inactivity_logoutTime = 60  # minutes
 
@@ -324,7 +356,6 @@ class API:
             time.sleep(delay)
             delay *= 2  # Exponential backoff (increase the delay after each attempt)
 
-
         # If we reach here, all retry attempts failed
         return json.dumps(
             {"status": False, "msg": "Unable to connect to the server. Network Error.", "data": {}})
@@ -339,7 +370,6 @@ class API:
         start_connectivity_monitor(API(), int(data.get("DisconnectLogoutTime")) * 60)
 
         self.lastactivitydate(data.get("EID"), "False", "", "")
-
 
     @staticmethod
     def take_screenshot_with_pillow(user_id):
@@ -385,9 +415,7 @@ class API:
 
             items = return_element.findall('item', namespaces)
 
-
             keys = items[0].text.split(",") if items[0].text else []
-
 
             keys = [key.strip() for key in keys]
 
@@ -407,7 +435,8 @@ class API:
 
             try:
                 if result["IPAddresNotFound"] == "Invalid IP Address":
-                    resp = {"status": False, "error": "ip", "msg": "[color=#0000FF][u]Click here[/u][/color]", "data": result}
+                    resp = {"status": False, "error": "ip", "msg": "[color=#0000FF][u]Click here[/u][/color]",
+                            "data": result}
             except:
                 resp = resp
 
@@ -458,8 +487,6 @@ class API:
         except requests.exceptions.RequestException as e:
             return json.dumps({"status": False, "msg": "Request failed", "data": {"error": str(e)}})
 
-
-
         try:
             # Parse the SOAP response
             root = ET.fromstring(soap_response)
@@ -482,7 +509,6 @@ class API:
             return json.dumps({"status": True, "data": result})
         else:
             return json.dumps({"status": False, "msg": "No response data", "data": {}})
-
 
     def logoutinactivity(self, userid, breaktype="inactivity"):
         if not self.is_user_logged_in():
@@ -602,11 +628,7 @@ class API:
 
         return_element = root.find('.//ns1:crashloginResponse/return', namespaces)
 
-
-
         if return_element is not None:
-
-
 
             items = return_element.findall('item', namespaces)
 
@@ -645,20 +667,15 @@ class API:
         stop_interval()
         stop_inactivity_timer()
 
-
     def maximize(self):
         global current_window
         current_window.restore()
-
-
 
     def logout(self, userid, eod, total_chats, total_billable_chats):
         if not self.is_user_logged_in():
             return
 
         global logged_in_user_info
-
-
 
         self._user_logged_in = False
         logged_in_user_info = None
@@ -880,7 +897,8 @@ class API:
         json_response = json.dumps(resp)
         return json_response
 
-    def breakin(self, userid, breaktype, comments, training_type_id="", trainer_id="", website="", ticket_no="", expected_duration=""):
+    def breakin(self, userid, breaktype, comments, training_type_id="", trainer_id="", website="", ticket_no="",
+                expected_duration=""):
         if not self.is_user_logged_in():
             return
 
@@ -950,7 +968,6 @@ class API:
 
             try:
 
-
                 resp = {"status": True, "data": result}
             except Exception as e:
                 resp = {"status": False, "msg": "Error parsing response", "data": {"error": str(e)}}
@@ -991,10 +1008,7 @@ class API:
         # Send the POST request
         response = requests.post(url, data=payload, headers=headers, timeout=10)
 
-
-
         soap_response = response.text
-
 
         # Parse the SOAP response
         root = ET.fromstring(soap_response)
@@ -1010,7 +1024,6 @@ class API:
         # Check for breakoutResponse
         return_element = root.find('.//ns1:breakoutResponse', namespaces)
 
-
         if not inactivity:
             self.start_inactivity()
 
@@ -1021,7 +1034,6 @@ class API:
 
             try:
 
-
                 resp = {"status": True, "data": result}
             except Exception as e:
                 resp = {"status": False, "msg": "Error parsing response", "data": {"error": str(e)}}
@@ -1030,8 +1042,6 @@ class API:
 
         json_response = json.dumps(resp)
         return json_response
-
-
 
     def version_check(self):
         headers = {
@@ -1199,7 +1209,6 @@ class API:
         # Print and parse the SOAP response
         soap_response = response.text
 
-
         # Parse the SOAP response XML
         root = ET.fromstring(soap_response)
 
@@ -1243,7 +1252,6 @@ class API:
             json_response = json.dumps(resp)
             return json_response
 
-
     def get_formated_break_types(self, breaks):
         break_types = breaks["data"]["break_types"][1:]
 
@@ -1286,6 +1294,7 @@ class API:
         logged_in_user_info = None
         self.user_info = None
 
+
 # ---------------------- Path Helper ----------------------
 
 
@@ -1297,6 +1306,7 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
 
     return os.path.join(base_path, relative_path)
+
 
 # ---------------------- Set App Window Icon ----------------------
 def set_window_icon():
@@ -1321,7 +1331,6 @@ def set_window_icon():
 
     except Exception as e:
         logger.warning(f"Unable to set icon or disable maximize: {e}")
-
 
 
 # ---------------------- Webview Loader ----------------------
@@ -1365,6 +1374,7 @@ def start_app(api, html_file):
 
     webview.start(debug=False, gui='edgechromium', func=set_window_icon)
 
+
 def inactivity_window(api, html_file):
     global current_window
 
@@ -1401,6 +1411,7 @@ def inactivity_window(api, html_file):
 
     # You can change 'edgechromium' to 'tkinter' here if needed
     webview.start(debug=False, gui='edgechromium', func=set_window_icon)
+
 
 # ---------------------- Entry Point ----------------------
 if __name__ == '__main__':
