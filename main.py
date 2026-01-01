@@ -87,7 +87,7 @@ interval_timer = None
 interval_lock = threading.Lock()
 repeat_interval_seconds = 0  # To store and reuse duration
 is_running = False  # Track whether timer is active
-app_version = None
+# app_version = None
 
 try:
     lock_handle = open(LOCK_FILE, 'w')
