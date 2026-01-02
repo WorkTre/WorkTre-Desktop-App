@@ -3,6 +3,8 @@ CMD: pyinstaller --onefile --noconsole --icon=setup.ico --add-data "setup.ico;."
 
 CMD: pyinstaller --onedir --noconsole --icon=setup.ico --name=WorkTre --hidden-import=plyer.platforms.win.notification --add-data "setup.ico;." --add-data "index.html;." --add-data "splash.png;." --add-data "assets;assets" --add-data "version.txt;." --add-data "icon.ico;." main.py
 
+CMD: pyinstaller --onefile --noconsole main.py
+
 CMD: pyinstaller WorkTre.spec
 
 TO RUN AT LOCAL:
