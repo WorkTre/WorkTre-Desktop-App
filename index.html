@@ -1826,8 +1826,24 @@
           }
 
          async function getAppVersion(){
-            document.getElementById("app_version").textContent = update_info['latest_version'];
-            document.getElementById("app_version-dashboard").textContent = update_info['latest_version'];
+            try {
+                // Call the Python API to get the version
+                const version = await window.pywebview.api.get_app_version();
+                console.log('version', version)
+                if (version) {
+                    document.getElementById("app_version").textContent = `v${version}`;
+                    document.getElementById("app_version-dashboard").textContent = `v${version}`;
+                } else {
+                    // Fallback if API fails
+                    document.getElementById("app_version").textContent = `v1.0.1`;
+                    document.getElementById("app_version-dashboard").textContent = `v1.0.1`;
+                }
+            } catch (error) {
+                console.error("Failed to get app version:", error);
+                // Fallback values
+                document.getElementById("app_version").textContent = `v1.0.1`;
+                document.getElementById("app_version-dashboard").textContent = `v1.0.1`;
+            }
          }
 
         function showConnectivityToast(isOnline) {
@@ -1910,9 +1926,21 @@
         }
     }
 
-    window.evaluate_js(
-        f"showUpdatePrompt('{update_info['latest_version']}', '{update_info['download_url']}')"
-    )
+    function showUpdatePrompt(updateInfo) {
+        console.log("Update available!");
+        console.log("Latest version:", updateInfo.latest_version);
+        console.log("Download URL:", updateInfo.download_url);
+        console.log("Description:", updateInfo.description);
+
+        // Show modal or notification with all the update info
+        document.getElementById('latest-version').textContent = updateInfo.latest_version;
+        document.getElementById('current-version').textContent = updateInfo.current_version;
+        document.getElementById('update-description').textContent = updateInfo.description || '';
+
+        // Show update modal
+        const modal = new bootstrap.Modal(document.getElementById('updateModal'));
+        modal.show();
+    }
 </script>
 
 

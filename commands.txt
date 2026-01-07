@@ -10,4 +10,22 @@ CMD: pyinstaller WorkTre.spec
 TO RUN AT LOCAL:
 CMD: python .\main.py
 
+UPDATER VERSION RELEASE WORKFLOW:
+
+1- Update version.txt (new version to be realese)
+2- Build the app
+    -   Run Pyinstaller (WorkTre.spec)
+    -   Run Inno Setup (setup.iss)
+    -   Output : WorkTreSetup-{#AppVersion}
+    -   Copy & Paste it and rename it with WorkTreInstaller.exe
+3- Upload installer to GitHub Releases
+    -   Tag : v{#AppVersion}
+    -   Asset : WorkTreInstaller.exe
+4- Update remote version (version.json) on GitHub
+    -   {
+          "version": "2.1.2",
+          "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.1.2/WorkTreInstaller.exe"
+        }
+
+
 
