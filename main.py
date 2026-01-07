@@ -22,14 +22,44 @@ from cryptography.fernet import Fernet
 from system_monitor import start_monitor
 from packaging import version
 
-#format: major.minor.build.revision
-APP_VERSION = "2.0.1"
 
-UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/refs/heads/main/version.json"
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
+def get_local_version():
+    try:
+        version_path = resource_path("version.txt")
+        if os.path.exists(version_path):
+            with open(resource_path("version.txt")) as f:
+                version_text = f.read().strip()
+                print("version_text:", version_text)
+                return version_text;
+        else:
+            logger.warning("version.txt not found, using default version")
+            return "1.0.1"  # Default fallback
+    except Exception as e:
+        logger.error(f"Error reading version: {e}")
+        return "1.0.1"  # Default fallback
+
+
+# format: major.minor.build.revision
+APP_VERSION = get_local_version()
+
+UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
+
 
 def install_update(installer_path):
     subprocess.Popen(installer_path)
     sys.exit()
+
 
 def check_for_updates():
     try:
@@ -53,11 +83,23 @@ def check_for_updates():
     return {"update": False}
 
 
-update_info = check_for_updates()
+UPDATE_INFO = check_for_updates()
 
-if update_info["update"]:
-    print("Update available:", update_info["latest_version"])
+if UPDATE_INFO["update"]:
+    print("Update available:", UPDATE_INFO["latest_version"])
     # pass info to frontend or show popup
+
+# Pass the entire update_info object as JSON
+js_code = f"""
+showUpdatePrompt({json.dumps(UPDATE_INFO)});
+"""
+
+try:
+    if webview.windows:
+        webview.windows[0].evaluate_js(js_code)
+except Exception as e:
+    with open("warn.log", "a", encoding="utf-8") as f:
+        f.write(f"Error showing modal: {e}\n")
 
 # === Single Instance Lock ===
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
@@ -87,7 +129,7 @@ interval_timer = None
 interval_lock = threading.Lock()
 repeat_interval_seconds = 0  # To store and reuse duration
 is_running = False  # Track whether timer is active
-# app_version = None
+app_version = APP_VERSION
 
 try:
     lock_handle = open(LOCK_FILE, 'w')
@@ -261,6 +303,9 @@ def stop_interval():
 
 
 class API:
+    def close_app(self):
+        sys.exit()
+
     def __init__(self):
         self._monitor_thread = None
         self._stop_monitor = threading.Event()
@@ -273,9 +318,17 @@ class API:
         self._warn_after = None
         self._kick_after = None
         self._warned = False
-        self.app_version = None
+        self.app_version = APP_VERSION
 
         self.maximum_inactivity_logoutTime = 60  # minutes
+
+    def get_app_version(self):
+        try:
+            version_text = get_local_version()
+            return version_text
+        except Exception as e:
+            logger.error(f"Error reading version: {e}")
+            return "1.0.1"  # Default fallback
 
     def notify_no_connection(self):
         if webview.windows:
@@ -1318,7 +1371,21 @@ def set_window_icon():
     try:
         window = webview.windows[0]
 
-        # Only works for tkinter GUI
+        def on_loaded():
+            if UPDATE_INFO.get("update"):
+                window.evaluate_js(
+                    f"""
+                    setTimeout(() => {{
+                        if (confirm("A new version ({UPDATE_INFO['latest_version']}) is available. Update now?")) {{
+                            window.open("{UPDATE_INFO['download_url']}");
+                            window.pywebview.api.close_app();
+                        }}
+                    }}, 300);
+                    """
+                )
+
+        window.events.loaded += on_loaded
+
         if window.gui == 'tkinter':
             tk_window = window.gui.window
             icon_path = resource_path('icon.ico')
@@ -1326,13 +1393,9 @@ def set_window_icon():
             if os.path.exists(icon_path):
                 tk_window.iconbitmap(icon_path)
 
-            # Set fixed window size
             tk_window.resizable(False, False)
             tk_window.maxsize(1092, 650)
             tk_window.minsize(1092, 650)
-
-        else:
-            logger.info(f"Skipping icon/resizing: GUI backend '{window.gui}' doesn't support it.")
 
     except Exception as e:
         logger.warning(f"Unable to set icon or disable maximize: {e}")
