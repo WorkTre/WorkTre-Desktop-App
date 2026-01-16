@@ -4,8 +4,8 @@
     <title>Trigger Python from JS</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet"/>
     <script src="assets/js/bootstrap.bundle.min.js"></script>
-    <link rel="stylesheet" href="assets/css/all.min.css"/>
-    <link rel="stylesheet" type="text/css" href="assets/css/style.css"/>
+    <link href="assets/css/all.min.css" rel="stylesheet"/>
+    <link href="assets/css/style.css" rel="stylesheet" type="text/css"/>
 </head>
 <style>
     .timer-content .timer-container {
@@ -138,7 +138,7 @@
 <body>
 <!-- Splash Loader -->
 <div id="splash-screen">
-    <img src="assets/images/splash.png" alt="Loading..."/>
+    <img alt="Loading..." src="assets/images/splash.png"/>
 </div>
 <div id="simple-loader" style="display:none">
     <div class="loader-box">Loading...</div>
@@ -154,7 +154,7 @@
 <!--              </div>-->
 <!--            </div>-->
 <!--          </div>-->
-<div id="internetOverlay" class="internet-overlay d-none">
+<div class="internet-overlay d-none" id="internetOverlay">
     <div class="overlay-content">
         <p>⚠️ You are offline. Please check your internet connection.</p>
     </div>
@@ -168,7 +168,7 @@
     <div class="row">
         <div class="col-6">
             <div class="login-screen-img">
-                <img class="ls-width" src="assets/images/login/loginScreen.jpg" alt="login-screen-img"/>
+                <img alt="login-screen-img" class="ls-width" src="assets/images/login/loginScreen.jpg"/>
                 <p id="app_version">-</p>
             </div>
         </div>
@@ -177,20 +177,20 @@
                 <div class="col">
                     <div class="login-form-content">
                         <div class="heading">
-                            <img src="assets/images/login/welcome.jpg" alt="welcome-img" width="63%">
+                            <img alt="welcome-img" src="assets/images/login/welcome.jpg" width="63%">
                             <!--<h1>Welcome</h1>
                             <p>Sign in to your account</p>-->
                         </div>
                         <form>
                             <div class="form-body">
                                 <div class="input-group">
-                                    <input type="text" id="email" class="form-input" placeholder="E-mail"/>
-                                    <img src="assets/images/email.png" alt="email" class="input-icon email"/>
+                                    <input class="form-input" id="email" placeholder="E-mail" type="text"/>
+                                    <img alt="email" class="input-icon email" src="assets/images/email.png"/>
                                 </div>
 
                                 <div class="input-group mb-2">
-                                    <input type="password" id="password" class="form-input" placeholder="Password"/>
-                                    <img src="assets/images/lock.png" alt="lock" class="input-icon lock"/>
+                                    <input class="form-input" id="password" placeholder="Password" type="password"/>
+                                    <img alt="lock" class="input-icon lock" src="assets/images/lock.png"/>
                                     <span class="password-toggle" id="togglePassword">
                                                 <i class="fas fa-eye"></i>
                                             </span>
@@ -198,19 +198,19 @@
 
                                 <div class="mb-4 d-flex justify-content-between px-5 link-f">
                                     <div>
-                                        <input type="checkbox" class="form-check-input" id="remember_me"/>
+                                        <input class="form-check-input" id="remember_me" type="checkbox"/>
                                         <label class="form-check-label" for="remember_me">Remember me</label>
                                     </div>
                                     <div>
                                         <label class="form-check-label">
-                                            <a href="https://worktre.com/reset_password/fpassword" target="_blank"
-                                               class="forget-link" id="forget_password">Forget Password?</a>
+                                            <a class="forget-link" href="https://worktre.com/reset_password/fpassword"
+                                               id="forget_password" target="_blank">Forget Password?</a>
                                         </label>
                                     </div>
                                 </div>
 
                                 <div class="mb-4">
-                                    <button type="submit" class="btn btn-primary">Login</button>
+                                    <button class="btn btn-primary" type="submit">Login</button>
                                 </div>
 
                                 <div class="mb-3 link">
@@ -220,7 +220,7 @@
                         </form>
                     </div>
                     <div class="form-bottom-img">
-                        <img src="assets/images/login/bottom-img.jpg" alt="form-bg"/>
+                        <img alt="form-bg" src="assets/images/login/bottom-img.jpg"/>
                     </div>
                 </div>
             </div>
@@ -234,30 +234,30 @@
         <div class="row align-items-center">
             <div class="col-4">
                 <div class="main-logo" id="main-dashboard-logo">
-                    <img src="assets/images/logo.png" alt="main-logo" width="81%"/>
+                    <img alt="main-logo" src="assets/images/logo.png" width="81%"/>
                 </div>
             </div>
             <div class="col-8">
                 <div class="nav-links">
                     <ul>
                         <li>
-                            <a href="#" id="break_logs"><img src="assets/images/break.png" alt="main-logo"/></a>
+                            <a href="#" id="break_logs"><img alt="main-logo" src="assets/images/break.png"/></a>
                             <p class="mb-0 label-txt">Break Logs</p>
                         </li>
                         <li>
-                            <a href="#" id="notifications"><img src="assets/images/ring.png" alt="main-logo"/></a>
+                            <a href="#" id="notifications"><img alt="main-logo" src="assets/images/ring.png"/></a>
                             <p class="mb-0 label-txt">Notifications</p>
                         </li>
                         <li>
-                            <a href="#" id="settings"><img src="assets/images/settings.png" alt="main-logo"/></a>
+                            <a href="#" id="settings"><img alt="main-logo" src="assets/images/settings.png"/></a>
                             <p class="mb-0 label-txt">Settings</p>
                         </li>
                         <li>
-                            <a href="#" id="profile"><img src="assets/images/avatar.png" alt="main-logo" class="avatar"
-                                                          style="width: 55%;" id="profile_img"/></a>
+                            <a href="#" id="profile"><img alt="main-logo" class="avatar" id="profile_img"
+                                                          src="assets/images/avatar.png" style="width: 55%;"/></a>
                         </li>
                         <li>
-                            <a href="#" id="logout"><img src="assets/images/logout.png" alt="main-logo"/></a>
+                            <a href="#" id="logout"><img alt="main-logo" src="assets/images/logout.png"/></a>
                             <p class="mb-0 label-txt">Logout</p>
                         </li>
                     </ul>
@@ -295,18 +295,18 @@
                                 <div class="user-info">
                                     <div class="user-name-heading">
                                         <h1 class="name-heading" id="empName"></h1>
-                                        <a href="#" target="_blank" rel="noopener noreferrer" id="open_in_web"
+                                        <a href="#" id="open_in_web" rel="noopener noreferrer" target="_blank"
                                            title="Open In Browser">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="27" height="27"
-                                                 viewBox="0 0 48 48" fill="none">
+                                            <svg fill="none" height="27" viewBox="0 0 48 48"
+                                                 width="27" xmlns="http://www.w3.org/2000/svg">
                                                 <!-- Outer rounded square -->
-                                                <rect x="4" y="4" width="40" height="40" rx="8" fill="#022B2B"/>
+                                                <rect fill="#022B2B" height="40" rx="8" width="40" x="4" y="4"/>
 
                                                 <!-- Inner grid squares -->
-                                                <rect x="14" y="14" width="8" height="8" rx="2" fill="white"/>
-                                                <rect x="26" y="14" width="8" height="8" rx="2" fill="white"/>
-                                                <rect x="14" y="26" width="8" height="8" rx="2" fill="white"/>
-                                                <rect x="26" y="26" width="8" height="8" rx="2" fill="white"/>
+                                                <rect fill="white" height="8" rx="2" width="8" x="14" y="14"/>
+                                                <rect fill="white" height="8" rx="2" width="8" x="26" y="14"/>
+                                                <rect fill="white" height="8" rx="2" width="8" x="14" y="26"/>
+                                                <rect fill="white" height="8" rx="2" width="8" x="26" y="26"/>
                                             </svg>
                                         </a>
                                     </div>
@@ -314,10 +314,10 @@
                                     <p class="shift-time" id="empShift"></p>
                                 </div>
                                 <div class="break-actions">
-                                    <img src="assets/images/play.png" width="10%" alt="timer" id="play"
-                                         data-bs-toggle="modal" data-bs-target="#breakModal" title="Take a break"/>
-                                    <img src="assets/images/pause.png" width="10%" alt="timer" id="pause"
-                                         title="End break"/>
+                                    <img alt="timer" data-bs-target="#breakModal" data-bs-toggle="modal" id="play"
+                                         src="assets/images/play.png" title="Take a break" width="10%"/>
+                                    <img alt="timer" id="pause" src="assets/images/pause.png" title="End break"
+                                         width="10%"/>
                                     <!-- <img src="assets/images/stop.png" width="10%" alt="timer" id="stop" /> -->
                                 </div>
                             </div>
@@ -440,16 +440,16 @@
             </div>
         </div>
     </main>
-    <span class="back-btn" id="back_button" style="display:none"><svg width="24" height="24" viewBox="0 0 24 24"
-                                                                      fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M15 18L9 12L15 6" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <span class="back-btn" id="back_button" style="display:none"><svg fill="none" height="24" viewBox="0 0 24 24"
+                                                                      width="24" xmlns="http://www.w3.org/2000/svg">
+  <path d="M15 18L9 12L15 6" stroke="black" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
 </svg>
 </span>
 
 
     <!-- Modal -->
     <!-- Modal -->
-    <div class="modal fade" id="breakModal" tabindex="-1" aria-labelledby="breakModalLabel" aria-hidden="true">
+    <div aria-hidden="true" aria-labelledby="breakModalLabel" class="modal fade" id="breakModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-xl">
             <div class="modal-content">
                 <div class="modal-body p-0" id="break">
@@ -469,15 +469,15 @@
                                                 <div class="form-group">
                                                     <textarea id="comment" placeholder="Comment"></textarea>
                                                 </div>
-                                                <button type="submit" data-bs-dismiss="modal">Submit</button>
+                                                <button data-bs-dismiss="modal" type="submit">Submit</button>
                                             </form>
                                         </div>
                                     </div>
                                     <div class="col-6">
                                         <div class="break-logo-wrapper">
-                                            <img src="assets/images/break-logo.png" alt="break-logo" width="100%"/>
-                                            <img src="assets/images/cross.png" alt="break-logo" width="9%"
-                                                 class="cross-icon" data-bs-dismiss="modal" aria-label="Close"/>
+                                            <img alt="break-logo" src="assets/images/break-logo.png" width="100%"/>
+                                            <img alt="break-logo" aria-label="Close" class="cross-icon"
+                                                 data-bs-dismiss="modal" src="assets/images/cross.png" width="9%"/>
                                         </div>
                                     </div>
                                 </div>
@@ -489,13 +489,13 @@
         </div>
     </div>
 
-    <div class="modal fade"
-         id="inactivityModal"
-         tabindex="-1"
+    <div aria-hidden="true"
          aria-labelledby="breakModalLabel"
-         aria-hidden="true"
+         class="modal fade"
          data-bs-backdrop="static"
-         data-bs-keyboard="false">
+         data-bs-keyboard="false"
+         id="inactivityModal"
+         tabindex="-1">
         <div class="modal-dialog modal-dialog-centered modal-xl">
             <div class="modal-content">
                 <div class="modal-body p-0" id="inactivity">
@@ -516,7 +516,7 @@
                                     </div>
                                     <div class="col-6">
                                         <div class="break-logo-wrapper">
-                                            <img src="assets/images/break-logo.png" alt="break-logo" width="100%"/>
+                                            <img alt="break-logo" src="assets/images/break-logo.png" width="100%"/>
                                         </div>
                                     </div>
                                 </div>
@@ -605,10 +605,52 @@
           return result.value; // Return the key (e.g., 'crash')
         }
 
+        // Add to your main JavaScript file (optional - for error handling)
+        function showUpdateErrorDialog(error) {
+            // Remove existing modal if present
+            const existingModal = document.getElementById('updateModal');
+            if (existingModal) {
+                document.body.removeChild(existingModal);
+            }
 
+            // Show error modal
+            const modal = document.createElement('div');
+            modal.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0,0,0,0.5);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 10000;
+            `;
 
+            const dialog = document.createElement('div');
+            dialog.style.cssText = `
+                background: white;
+                padding: 30px;
+                border-radius: 10px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+                text-align: center;
+                max-width: 400px;
+                width: 90%;
+            `;
 
+            dialog.innerHTML = `
+                <h2 style="margin-top: 0; color: #e74c3c;">⚠️ Update Failed</h2>
+                <p style="margin: 15px 0; color: #555;">${error}</p>
+                <button onclick="this.parentElement.parentElement.parentElement.removeChild(this.parentElement.parentElement)"
+                        style="background: #e74c3c; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-top: 10px;">
+                    Close
+                </button>
+            `;
 
+            modal.appendChild(dialog);
+            document.body.appendChild(modal);
+        }
 
 
         function createShiftTicks(totalShiftMinutes) {
