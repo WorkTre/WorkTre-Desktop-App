@@ -5,22 +5,28 @@ import tkinter as tk
 import subprocess
 import sys
 import os
+import math
+import ssl
 import logging
 import requests
 import socket
 import json
 import portalocker
 import tempfile
-from PIL import ImageGrab
-from io import BytesIO
 import base64
 import time
 import threading
 import shutil
 import xml.etree.ElementTree as ET
+from PIL import ImageGrab
+from io import BytesIO
 from cryptography.fernet import Fernet
 from system_monitor import start_monitor
 from packaging import version
+from urllib.request import urlopen, Request
+
+is_updating = False
+should_confirm_close = True  # Control whether to show confirmation
 
 
 def resource_path(relative_path):
@@ -87,19 +93,251 @@ UPDATE_INFO = check_for_updates()
 
 if UPDATE_INFO["update"]:
     print("Update available:", UPDATE_INFO["latest_version"])
-    # pass info to frontend or show popup
 
-# Pass the entire update_info object as JSON
-js_code = f"""
-showUpdatePrompt({json.dumps(UPDATE_INFO)});
-"""
 
-try:
-    if webview.windows:
-        webview.windows[0].evaluate_js(js_code)
-except Exception as e:
-    with open("warn.log", "a", encoding="utf-8") as f:
-        f.write(f"Error showing modal: {e}\n")
+def download_file_with_progress(url, filepath, window, latest_version):
+    """Download file with progress tracking"""
+    try:
+        # Disable SSL verification for simplicity (adjust as needed)
+        ssl_context = ssl._create_unverified_context()
+
+        # Open the URL
+        req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = urlopen(req, context=ssl_context)
+
+        # Get file size
+        total_size = int(response.headers.get('Content-Length', 0))
+        block_size = 8192  # 8KB chunks
+
+        logger.info(f"Downloading {url} (Size: {total_size} bytes)")
+
+        downloaded = 0
+        with open(filepath, 'wb') as file:
+            while True:
+                buffer = response.read(block_size)
+                if not buffer:
+                    break
+
+                file.write(buffer)
+                downloaded += len(buffer)
+
+                # Calculate progress percentage
+                if total_size > 0:
+                    percentage = (downloaded / total_size) * 100
+                else:
+                    percentage = 0
+
+                # Update progress in the UI
+                try:
+                    window.evaluate_js(f"""
+                        updateDownloadProgress({percentage:.2f});
+                    """)
+                except:
+                    pass
+
+                logger.debug(f"Downloaded: {downloaded}/{total_size} bytes ({percentage:.1f}%)")
+
+        logger.info(f"Download complete: {downloaded} bytes")
+        return True
+
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
+        return False
+
+
+def download_and_install_update(download_url, latest_version):
+    """Download the installer with progress and run it"""
+    global is_updating
+
+    try:
+        if not webview.windows:
+            return
+
+        window = webview.windows[0]
+        is_updating = True  # Set flag
+
+        # Create a temporary directory for the installer
+        temp_dir = tempfile.mkdtemp()
+        installer_path = os.path.join(temp_dir, "WorkTreInstaller.exe")
+
+        # Download the installer with progress tracking
+        logger.info(f"Downloading update from {download_url}")
+
+        success = download_file_with_progress(
+            download_url,
+            installer_path,
+            window,
+            latest_version
+        )
+
+        if not success:
+            is_updating = False  # Reset flag on error
+            raise Exception("Download failed. Please check your internet connection.")
+
+        # Download complete - show 100%
+        window.evaluate_js("""
+            updateDownloadProgress(100);
+        """)
+
+        logger.info(f"Download complete. Installing version {latest_version}")
+
+        # Give user a moment to see completion
+        time.sleep(2)
+
+        # Now close the window - should bypass confirmation
+        window.destroy()
+
+        # Run the installer
+        subprocess.Popen([installer_path], shell=True)
+
+        # Exit the application
+        sys.exit(0)
+
+    except Exception as e:
+        is_updating = False  # Reset flag on error
+        logger.error(f"Update failed: {e}")
+        # Show error message
+        if webview.windows:
+            show_update_error(str(e))
+        # Clean up temp directory
+        try:
+            if 'temp_dir' in locals():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+        except:
+            pass
+
+
+# Add this function for showing error dialogs
+def show_update_error(error_message):
+    """Show professional error dialog"""
+    try:
+        if webview.windows:
+            window = webview.windows[0]
+            window.evaluate_js(f"""
+                (function() {{
+                    // Remove existing modal if present
+                    const existingModal = document.getElementById('updateErrorModal');
+                    if (existingModal) {{
+                        document.body.removeChild(existingModal);
+                    }}
+
+                    // Create error modal
+                    const modal = document.createElement('div');
+                    modal.id = 'updateErrorModal';
+                    modal.style.cssText = `
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(231, 76, 60, 0.1);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 99999;
+                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    `;
+
+                    const dialog = document.createElement('div');
+                    dialog.style.cssText = `
+                        background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                        padding: 2px;
+                        border-radius: 12px;
+                        box-shadow: 0 10px 40px rgba(231, 76, 60, 0.3);
+                        max-width: 450px;
+                        width: 90%;
+                        overflow: hidden;
+                    `;
+
+                    const content = document.createElement('div');
+                    content.style.cssText = `
+                        background: white;
+                        padding: 30px;
+                        border-radius: 10px;
+                        text-align: center;
+                    `;
+
+                    content.innerHTML = `
+                        <!-- Error Icon -->
+                        <div style="
+                            width: 70px;
+                            height: 70px;
+                            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                            border-radius: 50%;
+                            margin: 0 auto 20px auto;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ">
+                            <svg width="35" height="35" viewBox="0 0 24 24" fill="white">
+                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                            </svg>
+                        </div>
+
+                        <!-- Title -->
+                        <h3 style="margin: 0 0 15px 0; color: #2c3e50; font-size: 22px; font-weight: 600;">
+                            Update Failed
+                        </h3>
+
+                        <!-- Error Message -->
+                        <div style="
+                            background: #ffeaea;
+                            border-radius: 8px;
+                            padding: 15px;
+                            margin: 20px 0;
+                            text-align: left;
+                            border-left: 4px solid #e74c3c;
+                        ">
+                            <p style="margin: 0; color: #c0392b; font-size: 14px; line-height: 1.5;">
+                                {error_message}
+                            </p>
+                        </div>
+
+                        <!-- Action Button -->
+                        <button onclick="document.body.removeChild(this.parentElement.parentElement.parentElement)" 
+                                style="
+                                    background: #e74c3c;
+                                    color: white;
+                                    border: none;
+                                    padding: 12px 30px;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-size: 15px;
+                                    font-weight: 600;
+                                    transition: all 0.3s ease;
+                                    margin-top: 10px;
+                                ">
+                            Close
+                        </button>
+
+                        <!-- Try Again Suggestion -->
+                        <div style="margin-top: 20px; color: #95a5a6; font-size: 13px;">
+                            You can try updating again from the Help menu
+                        </div>
+                    `;
+
+                    dialog.appendChild(content);
+                    modal.appendChild(dialog);
+                    document.body.appendChild(modal);
+
+                    // Add hover effect
+                    const style = document.createElement('style');
+                    style.textContent = `
+                        button:hover {{
+                            background: #c0392b;
+                            transform: translateY(-2px);
+                            box-shadow: 0 4px 15px rgba(231, 76, 60, 0.4);
+                        }}
+                        button:active {{
+                            transform: translateY(1px);
+                        }}
+                    `;
+                    document.head.appendChild(style);
+                }})();
+            """)
+    except Exception as e:
+        logger.error(f"Error showing error dialog: {e}")
+
 
 # === Single Instance Lock ===
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
@@ -329,6 +567,30 @@ class API:
         except Exception as e:
             logger.error(f"Error reading version: {e}")
             return "1.0.1"  # Default fallback
+
+    def downloadUpdate(self, download_url, latest_version):
+        """Handle update download and installation"""
+        try:
+            # Start the update process in a separate thread
+            import threading
+            update_thread = threading.Thread(
+                target=download_and_install_update,
+                args=(download_url, latest_version),
+                daemon=True
+            )
+            update_thread.start()
+            return {"status": True, "message": "Update started"}
+        except Exception as e:
+            logger.error(f"Failed to start update: {e}")
+            # Show error in UI
+            try:
+                if webview.windows:
+                    webview.windows[0].evaluate_js(f"""
+                        alert('Failed to start update: {str(e)}');
+                    """)
+            except:
+                pass
+            return {"status": False, "message": f"Update failed: {str(e)}"}
 
     def notify_no_connection(self):
         if webview.windows:
@@ -1373,16 +1635,381 @@ def set_window_icon():
 
         def on_loaded():
             if UPDATE_INFO.get("update"):
-                window.evaluate_js(
-                    f"""
-                    setTimeout(() => {{
-                        if (confirm("A new version ({UPDATE_INFO['latest_version']}) is available. Update now?")) {{
-                            window.open("{UPDATE_INFO['download_url']}");
-                            window.pywebview.api.close_app();
+                # Use f-string but properly escape JavaScript template literals
+                latest_version = UPDATE_INFO['latest_version']
+                download_url = UPDATE_INFO['download_url']
+                current_version = APP_VERSION
+
+                # Professional themed updater JavaScript
+                js_code = f"""
+                   (function() {{
+                       const latestVersion = "{latest_version}";
+                       const downloadUrl = "{download_url}";
+                       const currentVersion = "{current_version}";
+
+                       // Create professional modal with WorkTre theme
+                       const modal = document.createElement('div');
+                       modal.id = 'updateModal';
+                       modal.style.cssText = `
+                           position: fixed;
+                           top: 0;
+                           left: 0;
+                           width: 100%;
+                           height: 100%;
+                           background: rgba(0, 0, 0, 0.7);
+                           display: flex;
+                           justify-content: center;
+                           align-items: center;
+                           z-index: 9999;
+                           font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                       `;
+
+                       const dialog = document.createElement('div');
+                       dialog.style.cssText = `
+                           background: linear-gradient(135deg, rgb(1 167 141) 0%, rgb(0 47 52) 100%);;
+                           padding: 2px;
+                           border-radius: 12px;
+                           box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+                           max-width: 500px;
+                           width: 90%;
+                           overflow: hidden;
+                           /* height: 92%; */
+                       `;
+
+                       const content = document.createElement('div');
+                       content.style.cssText = `
+                           background: white;
+                           padding: 25px 40px;
+                           border-radius: 10px;
+                           text-align: center;
+                       `;
+
+                       content.innerHTML = `
+                           <!-- WorkTre Logo/Styling -->
+                           <div style="margin-bottom: 25px;">
+                               <div style="font-size: 28px; font-weight: 700; color: #2c3e50; margin-bottom: 5px;">
+                                   <img alt="login-screen-img" class="ls-width" src="assets/images/logo.png" style="width: 50%;">
+                               </div>
+                           </div>
+
+                           <!-- Title -->
+                           <h2 style="margin: 0 0 15px 0; color: #1ea88e; font-size: 21px; font-weight: 600;">
+                               Update Available
+                           </h2>
+
+                           <!-- Description -->
+                           <p style="margin: 0 0 25px 0; color: #5d6d7e; font-size: 14px; line-height: 1.5;">
+                               A new version is ready for installation
+                           </p>
+
+                           <!-- Version Info Box -->
+                           <div style="
+                               background: #f8f9fa;
+                               border-radius: 8px;
+                               padding: 12px;
+                               margin: 25px 0;
+                               text-align: left;
+                               border-left: 4px solid #1ca990;
+                               font-size: 14px;
+                           ">
+                               <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                                   <span style="color: #5d6d7e; font-weight: 500;">Current Version:</span>
+                                   <span style="color: #e74c3c; font-weight: 600;">v${{currentVersion}}</span>
+                               </div>
+                               <div style="display: flex; justify-content: space-between;">
+                                   <span style="color: #5d6d7e; font-weight: 500;">Latest Version:</span>
+                                   <span style="color: #27ae60; font-weight: 600;">v${{latestVersion}}</span>
+                               </div>
+                           </div>
+
+                           <!-- Update Notes -->
+                           <div style="
+                               background: #f0f7ff;
+                               border-radius: 8px;
+                               padding: 15px;
+                               margin: 20px 0;
+                               text-align: left;
+                               border: 1px solid #d1e3ff;
+                           ">
+                               <div style="color: #1fa88f; font-weight: 600; margin-bottom: 8px;">
+                                   What's New:
+                               </div>
+                               <ul style="
+                                   margin: 0;
+                                   padding-left: 20px;
+                                   color: #5d6d7e;
+                                   font-size: 14px;
+                                   line-height: 1.5;
+                               ">
+                                   <li>Performance improvements</li>
+                                   <li>Bug fixes and stability enhancements</li>
+                                   <li>New features and optimizations</li>
+                               </ul>
+                           </div>
+
+                           <!-- Buttons -->
+                           <div style="margin-top: 30px; display: flex; gap: 15px;">
+                               <button id="updateNow" style="
+                                   flex: 1;
+                                   background: linear-gradient(135deg, #032d35 0%, #1ea892 100%);
+                                   color: white;
+                                   border: none;
+                                   padding: 12px;
+                                   border-radius: 8px;
+                                   height: fit-content;
+                                   cursor: pointer;
+                                   font-size: 14px;
+                                   font-weight: 600;
+                                   transition: all 0.3s ease;
+                                   box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                               ">
+                                   <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                       <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+                                           <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                                       </svg>
+                                       Update Now
+                                   </div>
+                               </button>
+
+                               <button id="updateLater" style="
+                                   flex: 1;
+                                   background: transparent;
+                                   color: #1baa90;
+                                   border: 2px solid #1baa90;
+                                   padding: 10px;
+                                   border-radius: 8px;
+                                   height: fit-content;
+                                   cursor: pointer;
+                                   font-size: 14px;
+                                   font-weight: 600;
+                                   transition: all 0.3s ease;
+                               ">
+                                   Later
+                               </button>
+                           </div>
+
+                           <!-- Footer Note -->
+                           <div style="margin-top: 25px; color: #95a5a6; font-size: 12px;">
+                               The app will restart automatically after installation
+                           </div>
+                       `;
+
+                       dialog.appendChild(content);
+                       modal.appendChild(dialog);
+                       document.body.appendChild(modal);
+
+                       // Add hover effects via style tag
+                       const style = document.createElement('style');
+                       style.textContent = `
+                           #updateNow:hover {{
+                               transform: translateY(-2px);
+                               box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+                           }}
+                           #updateLater:hover {{
+                               background: #667eea;
+                               color: white;
+                           }}
+                           button:active {{
+                               transform: translateY(1px);
+                           }}
+                       `;
+                       document.head.appendChild(style);
+
+                       // Handle Update Now button
+                       document.getElementById('updateNow').onclick = function() {{
+                           startDownloadProcess(downloadUrl, latestVersion);
+                       }};
+
+                       // Handle Later button
+                       document.getElementById('updateLater').onclick = function() {{
+                           document.body.removeChild(modal);
+                       }};
+
+                       function startDownloadProcess(url, version) {{
+                           // Update to download view
+                           content.innerHTML = `
+                               <!-- WorkTre Logo -->
+                               <!-- <div style="margin-bottom: 25px;">
+                                   <div style="font-size: 28px; font-weight: 700; color: #2c3e50; margin-bottom: 5px;">
+                                       <img alt="login-screen-img" class="ls-width" src="assets/images/logo.png" style="width: 50%;">
+                                   </div>
+                               </div> -->
+
+                               <!-- Download Icon -->
+                               <div style="
+                                   /* width: 63px;
+                                   height: 63px;
+                                   background: linear-gradient(135deg, #02a88e 0%, #002f34 100%); */
+                                   border-radius: 50%;
+                                   margin: 0 auto 35px auto;
+                                   display: flex;
+                                   align-items: center;
+                                   justify-content: center;
+                                   animation: pulse 2s infinite;
+                               ">
+                                   <!-- <svg width="32" height="32" viewBox="0 0 24 24" fill="white">
+                                       <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/>
+                                   </svg> -->
+                                   <img alt="login-screen-img" class="ls-width" src="assets/images/setup.ico" style="width: 27%;">
+                               </div>
+
+                               <!-- Title -->
+                               <h2 style="margin: 0 0 15px 0; color: #002f34; font-size: 24px; font-weight: 600;">
+                                   Downloading Update
+                               </h2>
+
+                               <!-- Version Info -->
+                               <p style="margin: 0 0 30px 0; color: #02a88e; font-size: 16px;">
+                                   Installing version <span style="font-weight: 600; color: #002f34;">v${{version}}</span>
+                               </p>
+
+                               <!-- Progress Container -->
+                               <div style="
+                                   background: #f0f0f0;
+                                   border-radius: 10px;
+                                   height: 12px;
+                                   width: 100%;
+                                   margin: 30px 0 15px 0;
+                                   overflow: hidden;
+                                   box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+                               ">
+                                   <div id="progressBar" style="
+                                       background: linear-gradient(90deg, rgb(1 167 141) 0%, rgb(0 47 52) 100%);
+                                       height: 100%;
+                                       width: 0%;
+                                       border-radius: 10px;
+                                       transition: width 0.3s ease;
+                                       position: relative;
+                                   ">
+                                       <!-- Progress shine effect -->
+                                       <div style="
+                                           position: absolute;
+                                           top: 0;
+                                           left: 0;
+                                           right: 0;
+                                           bottom: 0;
+                                           background: linear-gradient(
+                                               90deg,
+                                               transparent 0%,
+                                               rgba(255, 255, 255, 0.4) 50%,
+                                               transparent 100%
+                                           );
+                                           animation: shine 2s infinite;
+                                       "></div>
+                                   </div>
+                               </div>
+
+                               <!-- Progress Text -->
+                               <div style="display: flex; justify-content: space-between; margin: 10px 0 25px 0;">
+                                   <span style="color: #032e33; font-size: 14px;">0%</span>
+                                   <span id="progressPercentage" style="color: #667eea; font-weight: 600; font-size: 16px; display: none;">0%</span>
+                                   <span style="color: #032e33; font-size: 14px;">100%</span>
+                               </div>
+
+                               <!-- Status Text -->
+                               <div id="statusText" style="
+                                   color: rgb(2 168 142);
+                                   font-size: 14px;
+                                   margin: 20px 0;
+                                   min-height: 20px;
+                               ">
+                                   Preparing download...
+                               </div>
+
+                               <!-- Loading animation -->
+                               <div id="loadingAnimation" style="margin: 20px 0;">
+                                   <div style="
+                                       border: 3px solid #f0f0f0;
+                                       border-top: 3px solid #01a78d;
+                                       border-radius: 50%;
+                                       width: 40px;
+                                       height: 40px;
+                                       animation: spin 1s linear infinite;
+                                       margin: 0 auto;
+                                   "></div>
+                               </div>
+
+                               <!-- Styles -->
+                               <style>
+                                   @keyframes pulse {{
+                                       0% {{ transform: scale(1); }}
+                                       50% {{ transform: scale(1.05); }}
+                                       100% {{ transform: scale(1); }}
+                                   }}
+
+                                   @keyframes spin {{
+                                       0% {{ transform: rotate(0deg); }}
+                                       100% {{ transform: rotate(360deg); }}
+                                   }}
+
+                                   @keyframes shine {{
+                                       0% {{ transform: translateX(-100%); }}
+                                       100% {{ transform: translateX(100%); }}
+                                   }}
+                               </style>
+                           `;
+
+                           // Show loading animation
+                           document.getElementById('loadingAnimation').style.display = 'block';
+
+                           // Call Python to handle the download
+                           window.pywebview.api.downloadUpdate(url, version);
+                       }}
+
+                       // Expose progress update function to Python
+                       window.updateDownloadProgress = function(percentage) {{
+                           const progressBar = document.getElementById('progressBar');
+                           const progressPercentage = document.getElementById('progressPercentage');
+                           const statusText = document.getElementById('statusText');
+
+                           if (progressBar && progressPercentage) {{
+                               const percent = Math.min(100, Math.max(0, percentage));
+                               progressBar.style.width = percent + '%';
+                               progressPercentage.textContent = percent.toFixed(1) + '%';
+
+                               // Update status text
+                               if (percent < 100) {{
+                                   statusText.innerHTML = `
+                                       <div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                           <svg width="16" height="16" viewBox="0 0 24 24" fill="#02a88e">
+                                               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                           </svg>
+                                           Downloading... ${{percent.toFixed(1)}}%
+                                       </div>
+                                   `;
+                                   statusText.style.color = '#02a88e';
+                               }} else {{
+                                   statusText.innerHTML = `
+                                       <div style="color: #27ae60; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                           <svg width="20" height="20" viewBox="0 0 24 24" fill="#27ae60">
+                                               <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                           </svg>
+                                           Download complete! Preparing installation...
+                                       </div>
+                                   `;
+                                   statusText.style.color = '#27ae60';
+
+                                   // Hide loading animation when complete
+                                   const loading = document.getElementById('loadingAnimation');
+                                   if (loading) loading.style.display = 'none';
+                               }}
+                           }}
+                       }};
+                   }})();
+                   """
+
+                try:
+                    # Execute the JavaScript
+                    window.evaluate_js(js_code)
+                    logger.info("Professional update modal shown")
+                except Exception as js_error:
+                    logger.error(f"Error executing update JS: {js_error}")
+                    # Professional fallback
+                    window.evaluate_js(f"""
+                        if (confirm('✨ Update Available!\\n\\nCurrent: v{current_version}\\nLatest: v{latest_version}\\n\\nUpdate now?')) {{
+                            window.pywebview.api.downloadUpdate('{download_url}', '{latest_version}');
                         }}
-                    }}, 300);
-                    """
-                )
+                    """)
 
         window.events.loaded += on_loaded
 
@@ -1435,12 +2062,53 @@ def start_app(api, html_file):
         y=top,  # Add Y position
         js_api=api,
         resizable=False,
-        confirm_close=True
+        confirm_close=False
     )
+
+    # Simple close handler
+    def on_closing():
+        global is_updating
+
+        # If updating, allow close immediately
+        if is_updating:
+            print("Closing for update")
+            return True
+
+        # Show tkinter confirmation dialog
+        try:
+            # Create a hidden tkinter window for the messagebox
+            import tkinter.messagebox as messagebox
+            root = tk.Tk()
+            root.withdraw()  # Hide the main window
+            root.attributes('-topmost', True)  # Make it appear on top
+
+            # Show the confirmation dialog
+            result = messagebox.askyesno(
+                "Confirm Exit",
+                "Are you sure you want to quit WorkTre?",
+                parent=root
+            )
+
+            root.destroy()  # Clean up
+
+            return result  # True if Yes, False if No
+
+        except Exception as e:
+            print(f"Error showing confirmation: {e}")
+            return True  # Allow close on error
+
+    current_window.events.closing += on_closing
 
     logging.info("started")
 
     webview.start(debug=False, gui='edgechromium', func=set_window_icon)
+
+    # Show update prompt after window is created (fallback)
+    if UPDATE_INFO["update"]:
+        try:
+            show_simple_update_prompt()
+        except:
+            pass
 
 
 def inactivity_window(api, html_file):
