@@ -25,6 +25,7 @@ from system_monitor import start_monitor
 from packaging import version
 from urllib.request import urlopen, Request
 import queue
+from tray_manager import TrayManager
 
 try:
     from plyer import notification
@@ -36,6 +37,8 @@ except ImportError:
 
 is_updating = False
 should_confirm_close = True  # Control whether to show confirmation
+
+tray_manager = None
 
 
 def resource_path(relative_path):
@@ -2843,7 +2846,7 @@ def set_window_icon():
 
 # ---------------------- Webview Loader ----------------------
 def start_app(api, html_file):
-    global current_window
+    global current_window, tray_manager
 
     html_path = resource_path(html_file)
     if not os.path.exists(html_path):
@@ -2852,76 +2855,94 @@ def start_app(api, html_file):
 
     start_monitor()
 
-    # Get screen dimensions for centering
+    # Get screen dimensions
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
-    root.destroy()  # Close the temporary tkinter window
+    root.destroy()
 
-    # Set your fixed window dimensions
     window_width = 1092
     window_height = 650
 
-    # Calculate center position
     left = (screen_width - window_width) // 2
     top = (screen_height - window_height) // 2
 
     current_window = webview.create_window(
-        title='WorkTre',
-        url=f'file://{html_path}',
+        title="WorkTre",
+        url=f"file://{html_path}",
         width=window_width,
         height=window_height,
-        x=left,  # Add X position
-        y=top,  # Add Y position
+        x=left,
+        y=top,
         js_api=api,
         resizable=False,
-        confirm_close=False
+        confirm_close=False,
     )
 
-    # Simple close handler
-    def on_closing():
-        global is_updating
+    # --------------------------------------------------
+    # Webview ready → create tray
+    # --------------------------------------------------
+    def on_webview_ready():
+        global tray_manager
 
-        # If updating, allow close immediately
+        if tray_manager is not None:
+            return  # already created
+
+        tray_manager = TrayManager(
+            app_name="WorkTre",
+            window_getter=lambda: current_window,
+            icon_path=resource_path("icon.ico"),
+            notifier=notification_manager,
+            logger=logger,
+        )
+
+        tray_manager.start()
+        logger.info("TrayManager initialized on window load")
+
+    current_window.events.loaded += on_webview_ready
+
+    # --------------------------------------------------
+    # Close button → minimize to tray
+    # --------------------------------------------------
+    def on_closing():
+        global is_updating, tray_manager
+
         if is_updating:
-            print("Closing for update")
+            logger.info("Closing for update")
             return True
 
-        # Show tkinter confirmation dialog
-        try:
-            # Create a hidden tkinter window for the messagebox
-            import tkinter.messagebox as messagebox
-            root = tk.Tk()
-            root.withdraw()  # Hide the main window
-            root.attributes('-topmost', True)  # Make it appear on top
-
-            # Show the confirmation dialog
-            result = messagebox.askyesno(
-                "Confirm Exit",
-                "Are you sure you want to quit WorkTre?",
-                parent=root
+        # Tray not ready yet → create it now
+        if tray_manager is None:
+            tray_manager = TrayManager(
+                app_name="WorkTre",
+                window_getter=lambda: current_window,
+                icon_path=resource_path("icon.ico"),
+                notifier=notification_manager,
+                logger=logger,
             )
+            tray_manager.start()
+            logger.info("TrayManager lazily initialized on close")
 
-            root.destroy()  # Clean up
-
-            return result  # True if Yes, False if No
-
-        except Exception as e:
-            print(f"Error showing confirmation: {e}")
-            return True  # Allow close on error
+        tray_manager.minimize_to_tray()
+        return False
 
     current_window.events.closing += on_closing
 
-    logging.info("started")
+    logger.info("Application started")
 
-    webview.start(debug=False, gui='edgechromium', func=set_window_icon)
+    webview.start(
+        debug=False,
+        gui="edgechromium",
+        func=set_window_icon,
+    )
 
-    # Show update prompt after window is created (fallback)
+    # Fallback update prompt
     if UPDATE_INFO["update"]:
         try:
             show_simple_update_prompt()
-        except:
+        except Exception:
             pass
+
 
 
 def inactivity_window(api, html_file):
