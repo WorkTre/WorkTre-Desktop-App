@@ -2894,6 +2894,7 @@ def start_app(api, html_file):
             icon_path=resource_path("icon.ico"),
             notifier=notification_manager,
             logger=logger,
+            is_updating_checker=lambda: is_updating,
         )
 
         tray_manager.start()
@@ -2942,7 +2943,6 @@ def start_app(api, html_file):
             show_simple_update_prompt()
         except Exception:
             pass
-
 
 
 def inactivity_window(api, html_file):

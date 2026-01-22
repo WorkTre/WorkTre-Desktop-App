@@ -4,17 +4,65 @@ import sys
 import pystray
 from PIL import Image, ImageDraw
 
+import ctypes
+from ctypes import wintypes
+
+user32 = ctypes.windll.user32
+kernel32 = ctypes.windll.kernel32
+
+MB_YESNO = 0x04
+MB_ICONQUESTION = 0x20
+MB_TASKMODAL = 0x2000
+MB_TOPMOST = 0x40000
+
+IDYES = 6
+
+
+def force_foreground(hwnd):
+    """
+    Force a window to the foreground and give it input focus.
+    """
+    fg_thread = user32.GetWindowThreadProcessId(
+        user32.GetForegroundWindow(), None
+    )
+    this_thread = kernel32.GetCurrentThreadId()
+
+    # Temporarily attach input threads
+    user32.AttachThreadInput(fg_thread, this_thread, True)
+
+    user32.SetForegroundWindow(hwnd)
+    user32.BringWindowToTop(hwnd)
+    user32.SetFocus(hwnd)
+
+    user32.AttachThreadInput(fg_thread, this_thread, False)
+
+
+def windows_confirm(title, message):
+    hwnd = user32.GetForegroundWindow()
+
+    force_foreground(hwnd)
+
+    result = user32.MessageBoxW(
+        hwnd,
+        message,
+        title,
+        MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL | MB_TOPMOST
+    )
+
+    return result == IDYES
+
 
 class TrayManager:
     def __init__(
-        self,
-        app_name: str,
-        window_getter,
-        icon_path: str = None,
-        on_quit=None,
-        on_restore=None,
-        notifier=None,
-        logger=None,
+            self,
+            app_name: str,
+            window_getter,
+            icon_path: str = None,
+            on_quit=None,
+            on_restore=None,
+            notifier=None,
+            logger=None,
+            is_updating_checker=None,  # ✅ NEW
     ):
         """
         :param app_name: App name shown in tray
@@ -32,6 +80,7 @@ class TrayManager:
         self.on_restore = on_restore
         self.notifier = notifier
         self.logger = logger
+        self.is_updating_checker = is_updating_checker
 
         self._icon = None
         self._thread = None
@@ -109,15 +158,33 @@ class TrayManager:
         self.restore()
 
     def quit(self):
-        """Quit application cleanly."""
-        self._log("Quitting application")
+        window = self.window_getter()
 
-        try:
-            if self.on_quit:
-                self.on_quit()
-        except Exception:
-            pass
+        if not window:
+            os._exit(0)
 
+        # Block quit during update
+        if self.is_updating_checker and self.is_updating_checker():
+            windows_confirm(
+                "Update in progress",
+                "WorkTre is currently updating. Please wait."
+            )
+            return
+
+        # IMPORTANT: window must be visible
+        window.show()
+        window.restore()
+
+        confirmed = windows_confirm(
+            "Quit WorkTre",
+            "Are you sure you want to quit WorkTre?"
+        )
+
+        if not confirmed:
+            self._log("User canceled quit")
+            return
+
+        self._log("User confirmed quit")
         self.stop()
         os._exit(0)
 
@@ -127,8 +194,15 @@ class TrayManager:
 
     def _build_menu(self):
         return pystray.Menu(
-            pystray.MenuItem("Restore", self._on_restore),
-            pystray.MenuItem("Quit", self._on_quit),
+            pystray.MenuItem(
+                "Restore",
+                self._on_restore,
+                default=True  # ✅ THIS is the key
+            ),
+            pystray.MenuItem(
+                "Quit",
+                self._on_quit
+            ),
         )
 
     def _on_restore(self, icon=None, item=None):
