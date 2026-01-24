@@ -30,6 +30,26 @@ class NotificationManager:
 
         self._init_backend()
 
+    # --------------------------------------------------
+    # Backend init
+    # --------------------------------------------------
+
+    def _init_backend(self):
+        self._backend = None
+
+        if IS_WINDOWS:
+            try:
+                from winotify import Notification
+                self._Notification = Notification
+                self._backend = "winotify"
+                self._log("Using winotify backend")
+                return
+            except Exception as e:
+                self._log(f"winotify init failed: {e}")
+
+        self._backend = "pywebview"
+        self._log("Using pywebview fallback backend")
+
     def start(self):
         """Start the notification manager"""
         if not self.is_running:
@@ -366,46 +386,60 @@ class NotificationManager:
         # Show Windows notification (for background/bring to attention)
         self.show_windows_notification(title, message, windows_duration)
 
-    def _init_backend(self):
-        self._backend = None
+    # --------------------------------------------------
+    # Internal
+    # --------------------------------------------------
 
-        if IS_WINDOWS:
-            try:
-                from win10toast import ToastNotifier
-                self._backend = ToastNotifier()
-                self._log("Using win10toast backend")
-                return
-            except Exception:
-                pass
-
-        # Fallback: pywebview dialog
-        self._backend = "pywebview"
-        self._log("Using pywebview notification fallback")
-
-    def _notify_internal(self, title, message, timeout):
+    def _notify_internal(self, title, message):
         try:
-            # Windows native toast
-            if IS_WINDOWS and self._backend != "pywebview":
-                self._backend.show_toast(
-                    self.app_name,
-                    message,
-                    duration=timeout,
-                    threaded=True
+            # Windows native toast (Win10 / Win11)
+            if IS_WINDOWS and self._backend == "winotify":
+                toast = self._Notification(
+                    app_id=self.app_name,
+                    title=title or self.app_name,
+                    msg=message,
+                    duration="short"
                 )
+                toast.show()
                 return
 
-            # pywebview fallback (non-blocking)
+            # Fallback: pywebview dialog
             window = self.window_getter() if self.window_getter else None
             if window:
                 window.gui.invoke(
                     lambda: window.create_alert_dialog(
-                        title=title,
+                        title=title or self.app_name,
                         message=message
                     )
                 )
 
         except Exception as e:
             self._log(f"Notification failed: {e}")
+
+    # def _notify_internal(self, title, message, timeout):
+    #     try:
+    #         # Windows native toast
+    #         if IS_WINDOWS and self._backend != "pywebview":
+    #             self._backend.show_toast(
+    #                 self.app_name,
+    #                 message,
+    #                 duration=timeout,
+    #                 threaded=True
+    #             )
+    #             return
+    #
+    #         # pywebview fallback (non-blocking)
+    #         window = self.window_getter() if self.window_getter else None
+    #         if window:
+    #             window.gui.invoke(
+    #                 lambda: window.create_alert_dialog(
+    #                     title=title,
+    #                     message=message
+    #                 )
+    #             )
+    #
+    #     except Exception as e:
+    #         self._log(f"Notification failed: {e}")
 
     def _worker(self):
         """Worker thread to process notifications"""
