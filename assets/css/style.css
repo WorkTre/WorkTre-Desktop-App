@@ -588,7 +588,8 @@ html, body {
 }
 
 #login_error, #ip_not_register{
-    font-size: 12px;
+    /*font-size: 12px;*/
+    font: menu;
     margin-bottom: 19px;
 }
  .break-wrapper button {

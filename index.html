@@ -213,7 +213,7 @@
                                     <button class="btn btn-primary" type="submit">Login</button>
                                 </div>
 
-                                <div class="mb-3 link">
+                                <div class="mb-5 link">
                                     <p id="login_error">&nbsp;</p>
                                 </div>
                             </div>
@@ -567,7 +567,6 @@
     <!--    const connectivityToast = new bootstrap.Toast(toastEl);-->
         const internetOverlay = document.getElementById('internetOverlay');
         const loginErrorNotify = document.getElementById("login_error")
-
 
 
         async function getSystemActionFromUser() {
@@ -1068,6 +1067,10 @@
                             breakFlag = data.OnBreakStatus === "True" ? "True" : "False";
                             crashLoginResponse = await window.pywebview.api.crashlogin(data.EID, result, breakFlag);
 
+                            // Show login success notification AFTER crash reason is submitted
+                            if (crashLoginResponse) {
+                                await window.pywebview.api.show_login_success_notification(email);
+                            }
                         } else {
                             hideLoader();
                             return; // Exit if user cancels or no result
@@ -1076,14 +1079,24 @@
                         breakType = status;
                         breakFlag = "False";
                         crashLoginResponse = await window.pywebview.api.crashlogin(data.EID, status, breakFlag);
+
+                        // Show login success notification
+                        await window.pywebview.api.show_login_success_notification(email);
                     } else {
                         breakType = status;
                         breakFlag = "True";
                         crashLoginResponse = await window.pywebview.api.crashlogin(data.EID, status, breakFlag);
+
+                        // Show login success notification
+                        await window.pywebview.api.show_login_success_notification(email);
                     }
                 } else if (data?.LoginStatus !== "AlreadyLogin") {
                     // Non-AlreadyLogin case, no crashlogin needed
                     console.warn("Proceeding without crashlogin.");
+
+                    // Show login success notification
+                    await window.pywebview.api.show_login_success_notification(email);
+
                 } else {
                     console.warn("AttendanceCrashStatus is not available in data.");
                 }
@@ -1168,7 +1181,8 @@
             } else {
                 if (data.IPAddresNotFound === 'Invalid IP Address') {
                     alert("Your IP address is not registered.");
-                    loginErrorNotify.innerHTML = `Your IP is not registered with WORKTRE. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
+
+                    loginErrorNotify.innerHTML = `Your IP is not registered with WorkTre. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
 
                     setTimeout(() => {
                         const ipLink = document.getElementById('ip_request');
