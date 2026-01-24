@@ -25,7 +25,7 @@ class NotificationManager:
         self.notification_queue = queue.Queue()
         self.active_notifications = []
         self.is_running = False
-        self.max_concurrent = 3
+        self.max_concurrent = 1
         self.notification_spacing = 100
 
         self._init_backend()
@@ -364,7 +364,7 @@ class NotificationManager:
             self.info(f"Professional Windows notification shown: {title}")
 
         except Exception as e:
-            self.error(f"Error showing professional notification: {e}")
+            self._log(f"Error showing professional notification: {e}")
             # Fallback to simpler method
             self.show_simple_windows_notification(title, message, duration)
 
@@ -400,6 +400,12 @@ class NotificationManager:
                     msg=message,
                     duration="short"
                 )
+
+                toast.add_actions(
+                    label="Open WorkTre",
+                    launch="worktre://restore"
+                )
+
                 toast.show()
                 return
 
@@ -457,7 +463,7 @@ class NotificationManager:
             except queue.Empty:
                 continue
             except Exception as e:
-                self.error(f"Error in notification worker: {e}")
+                self._log(f"Error in notification worker: {e}")
                 time.sleep(1)
 
     def _show_notification(self, notification):
@@ -483,7 +489,7 @@ class NotificationManager:
             })
 
         except Exception as e:
-            self.error(f"Error showing notification: {e}")
+            self._log(f"Error showing notification: {e}")
 
     def _create_notification_window(self, notification, position):
         """Create the actual notification window"""
@@ -528,7 +534,7 @@ class NotificationManager:
             root.mainloop()
 
         except Exception as e:
-            self.error(f"Error creating notification window: {e}")
+            self._log(f"Error creating notification window: {e}")
 
     def _get_theme(self, notification_type):
         """Get color theme for notification type"""

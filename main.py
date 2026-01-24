@@ -48,6 +48,13 @@ interval_lock = threading.Lock()
 repeat_interval_seconds = 0  # To store and reuse duration
 is_running = False  # Track whether timer is active
 
+RESTORE_REQUESTED = False
+
+if len(sys.argv) > 1:
+    for arg in sys.argv:
+        if "worktre://restore" in arg:
+            RESTORE_REQUESTED = True
+
 # === Single Instance Lock ===
 LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
 APPDATA = os.path.join(os.environ.get("APPDATA", "."), "WorkTre")
@@ -69,8 +76,8 @@ logger = logging.getLogger(__name__)
 logger.info("🚀 App started")
 
 # URLs
-url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
+SOAP_BASE_URL = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
 
 def resource_path(relative_path):
@@ -100,10 +107,6 @@ def get_local_version():
         return "1.0.1"  # Default fallback
 
 
-# format: major.minor.build.revision
-APP_VERSION = get_local_version()
-
-
 def install_update(installer_path):
     subprocess.Popen(installer_path)
     sys.exit()
@@ -131,27 +134,34 @@ def check_for_updates():
     return {"update": False}
 
 
+# format: major.minor.build.revision
+APP_VERSION = get_local_version()
 UPDATE_INFO = check_for_updates()
+
+# Import after APP_VERSION is defined
+from soap_actions import SOAPActionBuilder
+
+soap_actions = SOAPActionBuilder(SOAP_BASE_URL)
 
 if UPDATE_INFO["update"]:
     print("Update available:", UPDATE_INFO["latest_version"])
 
 
-def download_file_with_progress(url, filepath, window, latest_version):
+def download_file_with_progress(SOAP_BASE_URL, filepath, window, latest_version):
     """Download file with progress tracking"""
     try:
         # Disable SSL verification for simplicity (adjust as needed)
         ssl_context = ssl._create_unverified_context()
 
         # Open the URL
-        req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        req = Request(SOAP_BASE_URL, headers={'User-Agent': 'Mozilla/5.0'})
         response = urlopen(req, context=ssl_context)
 
         # Get file size
         total_size = int(response.headers.get('Content-Length', 0))
         block_size = 8192  # 8KB chunks
 
-        logger.info(f"Downloading {url} (Size: {total_size} bytes)")
+        logger.info(f"Downloading {SOAP_BASE_URL} (Size: {total_size} bytes)")
 
         downloaded = 0
         with open(filepath, 'wb') as file:
@@ -381,7 +391,21 @@ def show_update_error(error_message):
         logger.error(f"Error showing error dialog: {e}")
 
 
-app_version = APP_VERSION
+def restore_main_window():
+    global current_window
+
+    if not current_window:
+        return
+
+    current_window.show()
+    current_window.restore()
+
+    try:
+        current_window.bring_to_front()
+        current_window.focus()
+    except:
+        pass
+
 
 try:
     lock_handle = open(LOCK_FILE, 'w')
@@ -660,8 +684,22 @@ class API:
     def save_remembered_user(self, email, password):
         save_remembered_user(email, password)
 
+    def show_login_success_notification(self, username):
+        """Show login success notification - called from JavaScript after crash reason is handled"""
+        try:
+            notification_manager.show_professional_notification(
+                "✅ Login Successful",
+                f"{username}, Welcome back! You are now logged in",
+                "success",
+                5
+            )
+            return {"status": True, "message": "Notification shown"}
+        except Exception as e:
+            logger.error(f"Error showing login success notification: {e}")
+            return {"status": False, "message": str(e)}
+
     def login(self, username, password, max_retries=2, delay=2):
-        global logged_in_user_info, app_version
+        global logged_in_user_info
         logging.info("login")
 
         # Show loading notification
@@ -672,7 +710,7 @@ class API:
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/login",
+            "SOAPAction": soap_actions.login(),
         }
 
         # SOAP request payload
@@ -685,7 +723,7 @@ class API:
                  <employeeaccount>{username}</employeeaccount>
                  <password>{password}</password>
                  <ComputerName>{computer_name}</ComputerName>
-                 <wtversion>{app_version}</wtversion>
+                 <wtversion>{self.app_version}</wtversion>
                  <ipaddress>{ip}</ipaddress>
               </web:login>
            </soapenv:Body>
@@ -694,17 +732,21 @@ class API:
 
         try:
             # Send the POST request
-            response = requests.post(url, data=payload, headers=headers, timeout=10)  # Timeout set to 10 seconds
+            response = requests.post(SOAP_BASE_URL, data=payload, headers=headers,
+                                     timeout=10)  # Timeout set to 10 seconds
 
             if response.status_code == 200:
                 soap_response = response.text
                 user_info = self.process_soap_response(soap_response)
-
                 parsed = json.loads(user_info)
 
-                self.user_info = parsed["data"]
-                logged_in_user_info = parsed["data"]
+                # Ensure user_info is properly set
+                self.user_info = parsed.get("data", {})
+                if not self.user_info:
+                    logger.error("Login succeeded but user_info is empty")
+                    return json.dumps({"status": False, "msg": "Invalid user data", "data": {}})
 
+                logged_in_user_info = parsed["data"]
                 data = parsed["data"]
 
                 if data and isinstance(data, dict):
@@ -718,14 +760,6 @@ class API:
                             5
                         )
                         return json.dumps(resp)
-
-                # Show combined notification for successful login
-                notification_manager.show_professional_notification(
-                    "✅ Login Successful",
-                    f"{username}, Welcome back! You are now logged in",
-                    "success",
-                    5
-                )
 
                 return user_info
             else:
@@ -837,7 +871,8 @@ class API:
         # Headers for the SOAP request
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakout/inactivity",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakout/inactivity",
+            "SOAPAction": soap_actions.inactivity(),
         }
 
         # SOAP request payload
@@ -856,11 +891,11 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php/breakout"
+        # url = f"{SOAP_BASE_URL}/breakout"
 
         # Send the POST request
         try:
-            response = requests.post(url, data=payload, headers=headers, timeout=10)
+            response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
             soap_response = response.text
 
@@ -920,12 +955,13 @@ class API:
         if not self.is_user_logged_in():
             return
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/logoutinactivity",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/logoutinactivity",
+            "SOAPAction": soap_actions.logoutinactivity(),
         }
 
         # SOAP request payload
@@ -943,7 +979,7 @@ class API:
         """
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -988,14 +1024,15 @@ class API:
             return json_response
 
     def crashlogin(self, userid, breaktype, onbreak):
-        global app_version
+        # global app_version
 
         computer_name = socket.gethostname()
         ip = get_dynamic_ip()
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/crashlogin",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/crashlogin",
+            "SOAPAction": soap_actions.crashlogin(),
         }
 
         # SOAP request payload
@@ -1009,7 +1046,7 @@ class API:
                  <breaktype>{breaktype}</breaktype>
                  <onbreak>{onbreak}</onbreak>
                  <ComputerName>{computer_name}</ComputerName>
-                 <wtversion>{app_version}</wtversion>
+                 <wtversion>{self.app_version}</wtversion>
                  <ipaddress>{ip}</ipaddress>
               </web:crashlogin>
            </soapenv:Body>
@@ -1017,7 +1054,7 @@ class API:
         """
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1097,7 +1134,8 @@ class API:
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/logout",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/logout",
+            "SOAPAction": soap_actions.logout(),
         }
 
         # SOAP request payload
@@ -1117,7 +1155,7 @@ class API:
         """
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
         # Parse the SOAP response
@@ -1171,7 +1209,8 @@ class API:
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/lastactivitydate",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/lastactivitydate",
+            "SOAPAction": soap_actions.lastactivitydate(),
         }
 
         # SOAP request payload
@@ -1192,10 +1231,10 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1246,7 +1285,8 @@ class API:
         # Headers
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/getservice",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/getservice",
+            "SOAPAction": soap_actions.getservice(),
         }
 
         # SOAP request payload
@@ -1264,10 +1304,10 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1325,7 +1365,8 @@ class API:
         # Headers for the SOAP request
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakin",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakin",
+            "SOAPAction": soap_actions.breakin(),
         }
 
         # SOAP request payload
@@ -1350,10 +1391,10 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1423,7 +1464,8 @@ class API:
         # Headers for the SOAP request
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakout",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/breakout",
+            "SOAPAction": soap_actions.breakout(),
         }
 
         # SOAP request payload
@@ -1442,10 +1484,10 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1504,7 +1546,8 @@ class API:
     def version_check(self):
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/versioncheck",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/versioncheck",
+            "SOAPAction": soap_actions.versioncheck(),
         }
 
         payload = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1518,10 +1561,10 @@ class API:
         </soapenv:Envelope>
         """
 
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php/versioncheck"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php/versioncheck"
 
         try:
-            response = requests.post(url, data=payload, headers=headers, timeout=10)
+            response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
             soap_response = response.text
 
         except requests.exceptions.RequestException as e:
@@ -1573,7 +1616,8 @@ class API:
         # Headers for the SOAP request
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/getBreakTypes",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/getBreakTypes",
+            "SOAPAction": soap_actions.getBreakTypes(),
         }
 
         # SOAP request payload
@@ -1590,10 +1634,10 @@ class API:
         """
 
         # Endpoint URL
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
 
         # Send the POST request
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         soap_response = response.text
 
@@ -1643,7 +1687,8 @@ class API:
         # Headers for the SOAP request
         headers = {
             "Content-Type": "text/xml; charset=utf-8",
-            "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/requestforaccess",
+            # "SOAPAction": "https://worktre.com/webservices/worktre_soap_2.0/services.php/requestforaccess",
+            "SOAPAction": soap_actions.requestforaccess(),
         }
 
         # SOAP request payload
@@ -1661,8 +1706,9 @@ class API:
         """
 
         # Send the POST request to the API
-        url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
-        response = requests.post(url, data=payload, headers=headers, timeout=10)
+        # url = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+
+        response = requests.post(SOAP_BASE_URL, data=payload, headers=headers, timeout=10)
 
         # Print and parse the SOAP response
         soap_response = response.text
@@ -1736,16 +1782,57 @@ class API:
         reset_idle_timer()
 
     def start_inactivity(self):
+        logger.info(f"start_inactivity called. is_user_logged_in: {self.is_user_logged_in()}")
+        logger.info(f"user_info type: {type(self.user_info)}, user_info: {self.user_info}")
+
         if not self.is_user_logged_in():
+            logger.warning("Cannot start inactivity timer: User not logged in")
             return
 
-        threading.Thread(
-            target=start_inactivity_timer,
-            args=(int(self.user_info.get("InactivityBreakTime")), int(self.user_info.get("InactivityBreakLogoutTime"))),
-            # args=(0.3, 1),
-            kwargs={"on_warn": on_warning, "on_exit": on_exit},
-            daemon=True
-        ).start()
+        # Check if user_info exists and has required properties
+        if not self.user_info or not isinstance(self.user_info, dict):
+            logger.warning("Cannot start inactivity timer: user_info is missing or invalid")
+            return
+
+        try:
+            # Safely get values with defaults
+            inactivity_break_time = self.user_info.get("InactivityBreakTime")
+            inactivity_logout_time = self.user_info.get("InactivityBreakLogoutTime")
+
+            # Convert to integers with fallback defaults
+            if inactivity_break_time is not None:
+                inactivity_break_time = int(inactivity_break_time)
+            else:
+                inactivity_break_time = 5  # Default 5 minutes for warning
+                logger.warning(f"InactivityBreakTime not found, using default: {inactivity_break_time}")
+
+            if inactivity_logout_time is not None:
+                inactivity_logout_time = int(inactivity_logout_time)
+            else:
+                inactivity_logout_time = 10  # Default 10 minutes for logout
+                logger.warning(f"InactivityBreakLogoutTime not found, using default: {inactivity_logout_time}")
+
+            logger.info(
+                f"Starting inactivity timer - Warning after: {inactivity_break_time}m, Logout after: {inactivity_logout_time}m")
+
+            threading.Thread(
+                target=start_inactivity_timer,
+                args=(inactivity_break_time, inactivity_logout_time),
+                kwargs={"on_warn": on_warning, "on_exit": on_exit},
+                daemon=True
+            ).start()
+
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error converting inactivity times to integers: {e}")
+            # Start with safe defaults
+            threading.Thread(
+                target=start_inactivity_timer,
+                args=(5, 10),  # Default values: 5 min warning, 10 min logout
+                kwargs={"on_warn": on_warning, "on_exit": on_exit},
+                daemon=True
+            ).start()
+        except Exception as e:
+            logger.error(f"Error starting inactivity timer: {e}")
 
     def redirect_login(self):
         global logged_in_user_info
@@ -2222,6 +2309,9 @@ def start_app(api, html_file):
     # --------------------------------------------------
     def on_webview_ready():
         global tray_manager
+
+        if RESTORE_REQUESTED:
+            restore_main_window()
 
         if tray_manager is not None:
             return  # already created
