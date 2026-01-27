@@ -130,6 +130,13 @@ class TrayManager:
             window.hide()
 
         if notify and self.notifier:
+            # Show startup notification
+            self.notifier.add_notification(
+                self.app_name,
+                "WorkTre timer is running in background",
+                "info",
+                4
+            )
             self.notifier.add_notification(
                 self.app_name,
                 "Application is running in the system tray",

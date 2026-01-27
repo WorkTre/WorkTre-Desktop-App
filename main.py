@@ -77,7 +77,7 @@ logger.info("🚀 App started")
 
 # URLs
 UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
-SOAP_BASE_URL = "https://worktre.com:443/webservices/worktre_soap_2.0/services.php"
+SOAP_BASE_URL = "https://worktre.com:443/webservices/worktre_soap_2.1.1/services.php"
 
 
 def resource_path(relative_path):
@@ -2296,14 +2296,6 @@ def start_app(api, html_file):
     )
     notification_manager.start()
 
-    # Show startup notification
-    notification_manager.show_professional_notification(
-        "🚀 WorkTre Started",
-        "Work timer is running in background",
-        "info",
-        4
-    )
-
     # --------------------------------------------------
     # Webview ready → create tray
     # --------------------------------------------------
@@ -2316,16 +2308,16 @@ def start_app(api, html_file):
         if tray_manager is not None:
             return  # already created
 
-        tray_manager = TrayManager(
-            app_name="WorkTre",
-            window_getter=lambda: current_window,
-            icon_path=resource_path("icon.ico"),
-            notifier=notification_manager,
-            logger=logger,
-            is_updating_checker=lambda: is_updating,
-        )
-
-        tray_manager.start()
+        # tray_manager = TrayManager(
+        #     app_name="WorkTre",
+        #     window_getter=lambda: current_window,
+        #     icon_path=resource_path("icon.ico"),
+        #     notifier=notification_manager,
+        #     logger=logger,
+        #     is_updating_checker=lambda: is_updating,
+        # )
+        #
+        # tray_manager.start()
         logger.info("TrayManager initialized on window load")
 
     current_window.events.loaded += on_webview_ready

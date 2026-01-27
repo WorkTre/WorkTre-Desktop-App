@@ -1,5 +1,5 @@
 #define MyAppName "WorkTre"
-#define AppVersion "2.1.3" ;- format: major.minor.build.revision
+#define AppVersion "2.2.1" ;- format: major.minor.build.revision
 
 [Setup]
 AppName={#MyAppName}
@@ -9,7 +9,7 @@ AppPublisher=Bioncos Global - IT Solutions
 VersionInfoVersion={#AppVersion}
 VersionInfoCompany=Bioncos Global - IT Solutions
 VersionInfoDescription=WorkTre Desktop Application
-VersionInfoCopyright=Copyright © 2025 Bioncos Global
+VersionInfoCopyright=Copyright © 2026 Bioncos Global
 VersionInfoProductName=WorkTre
 VersionInfoProductVersion={#AppVersion}
 VersionInfoProductTextVersion={#AppVersion}

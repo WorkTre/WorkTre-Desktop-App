@@ -83,28 +83,45 @@
     z-index: 9999;
   }
 #simple-loader {
-  display: none; /* hidden by default */
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-
-  z-index: 9999;
-  pointer-events: all; /* block clicks */
-  display: flex;
-  align-items: center;
-  justify-content: center;
+    display: none; /* hidden by default */
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(255, 255, 255, 0.9); /* Optional: white background */
+    z-index: 9999;
+    pointer-events: all; /* block clicks */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 #simple-loader .loader-box {
-  background-color: white;
-  font-size: 20px;
+    display: flex;
+    flex-direction: column; /* Stack image and text vertically */
+    align-items: center; /* Center children horizontally */
+    justify-content: center;
+    background-color: white;
+    /*font-size: 20px;*/
+    font-weight: bold;
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0,0,0,0.1);
+}
+
+.inner-splash-loader {
+    width: 50%;
+    height: auto;
+    margin-bottom: 15px; /* Space between image and text */
+}
+
+.loader-box-text {
+  font-size: 18px;
   font-weight: bold;
-  padding: 20px 40px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  box-shadow: 0 0 10px rgba(0,0,0,0.1);
+  color: #19aa8f;
+  text-align: center;
 }
 
 .internet-overlay {
@@ -141,7 +158,10 @@
     <img alt="Loading..." src="assets/images/splash.png"/>
 </div>
 <div id="simple-loader" style="display:none">
-    <div class="loader-box">Loading...</div>
+    <div class="loader-box">
+        <img alt="Loading..." class="inner-splash-loader" src="assets/images/splash.png"/>
+        <div class="loader-box-text">Loading...</div>
+    </div>
 </div>
 <span id="empty_element"></span>
 <!--          <div class="position-fixed top-0 end-0 p-3" style="z-index: 1060">-->
