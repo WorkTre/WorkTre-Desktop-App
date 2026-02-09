@@ -1,7 +1,21 @@
+# Import platform utilities FIRST
+from platform_utils import (
+    get_app_data_dir,
+    get_log_file_path,
+    get_temp_dir,
+    get_icon_path,
+    show_confirmation_dialog,
+    setup_logging,
+    create_single_instance_lock,
+    cleanup_temp_files
+)
+
+# Import cross-platform tray manager (create this file next)
+from tray_manager_cross import create_tray_manager
+
 from inactivity_manager import start_inactivity_timer, stop_inactivity_timer, reset_idle_timer
 from connectivity_monitor import start_connectivity_monitor
 from system_monitor import start_monitor
-from tray_manager import TrayManager
 from notification_manager import NotificationManager
 import webview
 import tkinter as tk
@@ -56,24 +70,23 @@ if len(sys.argv) > 1:
             RESTORE_REQUESTED = True
 
 # === Single Instance Lock ===
-LOCK_FILE = os.path.join(tempfile.gettempdir(), "mywebviewapp.lock")
-APPDATA = os.path.join(os.environ.get("APPDATA", "."), "WorkTre")
+locked, lock_file = create_single_instance_lock("WorkTre")
+if not locked:
+    # We need to use print here since logger isn't set up yet
+    print("Another instance is already running. Exiting.")
+    sys.exit(0)
+
+# === Application Directories ===
+APPDATA = get_app_data_dir("WorkTre")
 os.makedirs(APPDATA, exist_ok=True)
 
 # Save important files inside APPDATA path
 STORAGE_PATH = os.path.join(APPDATA, 'remember_me.json')
 KEY_PATH = os.path.join(APPDATA, 'remember_me.key')
 
-# Logging setup
-log_path = os.path.join(APPDATA, "log.txt")
-logging.basicConfig(
-    filename=log_path,
-    level=logging.DEBUG,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    filemode="a"
-)
-logger = logging.getLogger(__name__)
-logger.info("🚀 App started")
+# === Logging Setup ===
+logger = setup_logging("WorkTre", level=logging.DEBUG)
+logger.info("🚀 App started - Cross-platform version")
 
 # URLs
 UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
@@ -98,7 +111,7 @@ def get_local_version():
             with open(resource_path("version.txt")) as f:
                 version_text = f.read().strip()
                 print("version_text:", version_text)
-                return version_text;
+                return version_text
         else:
             logger.warning("version.txt not found, using default version")
             return "1.0.1"  # Default fallback
@@ -147,21 +160,21 @@ if UPDATE_INFO["update"]:
     print("Update available:", UPDATE_INFO["latest_version"])
 
 
-def download_file_with_progress(SOAP_BASE_URL, filepath, window, latest_version):
+def download_file_with_progress(url, filepath, window, latest_version):
     """Download file with progress tracking"""
     try:
         # Disable SSL verification for simplicity (adjust as needed)
         ssl_context = ssl._create_unverified_context()
 
         # Open the URL
-        req = Request(SOAP_BASE_URL, headers={'User-Agent': 'Mozilla/5.0'})
+        req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         response = urlopen(req, context=ssl_context)
 
         # Get file size
         total_size = int(response.headers.get('Content-Length', 0))
         block_size = 8192  # 8KB chunks
 
-        logger.info(f"Downloading {SOAP_BASE_URL} (Size: {total_size} bytes)")
+        logger.info(f"Downloading {url} (Size: {total_size} bytes)")
 
         downloaded = 0
         with open(filepath, 'wb') as file:
@@ -210,7 +223,16 @@ def download_and_install_update(download_url, latest_version):
 
         # Create a temporary directory for the installer
         temp_dir = tempfile.mkdtemp()
-        installer_path = os.path.join(temp_dir, "WorkTreInstaller.exe")
+
+        # Platform-specific installer names
+        if sys.platform == "win32":
+            installer_name = "WorkTreInstaller.exe"
+        elif sys.platform == "darwin":
+            installer_name = "WorkTreInstaller.dmg"
+        else:  # Linux
+            installer_name = "WorkTreInstaller.AppImage"
+
+        installer_path = os.path.join(temp_dir, installer_name)
 
         # Download the installer with progress tracking
         logger.info(f"Downloading update from {download_url}")
@@ -407,20 +429,8 @@ def restore_main_window():
         pass
 
 
-try:
-    lock_handle = open(LOCK_FILE, 'w')
-    # Try to acquire a non-blocking exclusive lock
-    portalocker.lock(lock_handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-except portalocker.exceptions.LockException:
-    sys.exit(0)
-
-
 def cleanup_temp_dir():
-    temp_path = os.path.join(os.getcwd(), 'webview_temp')
-    try:
-        shutil.rmtree(temp_path, ignore_errors=True)
-    except Exception:
-        pass
+    cleanup_temp_files("WorkTre")
 
 
 cleanup_temp_dir()
@@ -443,15 +453,15 @@ def get_dynamic_ip():
 # ---------------------- Your JS API ----------------------
 
 def get_key_path():
-    # Get a safe writable directory
-    base_dir = os.path.expanduser("~\\AppData\\Roaming\\WorkTre")
+    """Get cross-platform key path."""
+    base_dir = get_app_data_dir("WorkTre")
     os.makedirs(base_dir, exist_ok=True)
     return os.path.join(base_dir, "remember_me.key")
 
 
 def load_key():
     try:
-        key_path = get_key_path()  # ✅ This ensures we use AppData path
+        key_path = get_key_path()
 
         if not os.path.exists(key_path):
             key = Fernet.generate_key()
@@ -1840,19 +1850,6 @@ class API:
         self.user_info = None
 
 
-# ---------------------- Path Helper ----------------------
-
-
-def resource_path(relative_path):
-    try:
-        # For PyInstaller
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
-
 # ---------------------- Set App Window Icon ----------------------
 def set_window_icon():
     try:
@@ -2238,12 +2235,18 @@ def set_window_icon():
 
         window.events.loaded += on_loaded
 
+        # Platform-specific window setup
         if window.gui == 'tkinter':
             tk_window = window.gui.window
-            icon_path = resource_path('icon.ico')
 
-            if os.path.exists(icon_path):
-                tk_window.iconbitmap(icon_path)
+            # Get appropriate icon for current platform
+            icon_path = get_icon_path("icon")
+            if icon_path and os.path.exists(icon_path):
+                try:
+                    tk_window.iconbitmap(icon_path)
+                except:
+                    # If iconbitmap fails, try other methods
+                    pass
 
             tk_window.resizable(False, False)
             tk_window.maxsize(1092, 650)
@@ -2275,6 +2278,14 @@ def start_app(api, html_file):
 
     left = (screen_width - window_width) // 2
     top = (screen_height - window_height) // 2
+
+    # Determine appropriate GUI backend
+    if sys.platform == "win32":
+        gui_backend = "edgechromium"  # Best for Windows
+    elif sys.platform == "darwin":
+        gui_backend = "cef"  # Good for macOS
+    else:  # Linux
+        gui_backend = "qt"  # or "gtk" depending on desktop environment
 
     current_window = webview.create_window(
         title="WorkTre",
@@ -2308,17 +2319,20 @@ def start_app(api, html_file):
         if tray_manager is not None:
             return  # already created
 
-        # tray_manager = TrayManager(
-        #     app_name="WorkTre",
-        #     window_getter=lambda: current_window,
-        #     icon_path=resource_path("icon.ico"),
-        #     notifier=notification_manager,
-        #     logger=logger,
-        #     is_updating_checker=lambda: is_updating,
-        # )
-        #
-        # tray_manager.start()
-        logger.info("TrayManager initialized on window load")
+        # Get icon path for current platform
+        icon_path = get_icon_path("icon") or resource_path("icon.png")
+
+        tray_manager = create_tray_manager(
+            app_name="WorkTre",
+            window_getter=lambda: current_window,
+            icon_path=get_icon_path("icon") or resource_path("icon.png"),
+            notifier=notification_manager,
+            logger=logger,
+            is_updating_checker=lambda: is_updating,
+        )
+
+        tray_manager.start()
+        logger.info("create_tray_manager initialized on window load")
 
     current_window.events.loaded += on_webview_ready
 
@@ -2334,15 +2348,19 @@ def start_app(api, html_file):
 
         # Tray not ready yet → create it now
         if tray_manager is None:
-            tray_manager = TrayManager(
+            # Get icon path for current platform
+            icon_path = get_icon_path("icon") or resource_path("icon.png")
+
+            tray_manager = create_tray_manager(
                 app_name="WorkTre",
                 window_getter=lambda: current_window,
-                icon_path=resource_path("icon.ico"),
+                icon_path=get_icon_path("icon") or resource_path("icon.png"),
                 notifier=notification_manager,
                 logger=logger,
+                is_updating_checker=lambda: is_updating,
             )
             tray_manager.start()
-            logger.info("TrayManager lazily initialized on close")
+            logger.info("create_tray_manager lazily initialized on close")
 
         tray_manager.minimize_to_tray()
         return False
@@ -2353,16 +2371,38 @@ def start_app(api, html_file):
 
     webview.start(
         debug=False,
-        gui="edgechromium",
+        gui=gui_backend,  # Use platform-appropriate backend
         func=set_window_icon,
     )
 
-    # Fallback update prompt
+
+def show_simple_update_prompt():
+    """Simple fallback update prompt if JS modal fails."""
     if UPDATE_INFO["update"]:
         try:
-            show_simple_update_prompt()
-        except Exception:
-            pass
+            from tkinter import messagebox
+            import tkinter as tk
+
+            root = tk.Tk()
+            root.withdraw()
+
+            response = messagebox.askyesno(
+                "Update Available",
+                f"A new version ({UPDATE_INFO['latest_version']}) is available!\n\n"
+                f"Current version: {APP_VERSION}\n\n"
+                "Would you like to update now?"
+            )
+
+            root.destroy()
+
+            if response:
+                # Start update
+                download_and_install_update(
+                    UPDATE_INFO['download_url'],
+                    UPDATE_INFO['latest_version']
+                )
+        except Exception as e:
+            logger.error(f"Simple update prompt failed: {e}")
 
 
 def inactivity_window(api, html_file):
@@ -2388,6 +2428,14 @@ def inactivity_window(api, html_file):
     left = (screen_width - window_width) // 2
     top = (screen_height - window_height) // 2
 
+    # Determine GUI backend
+    if sys.platform == "win32":
+        gui_backend = "edgechromium"
+    elif sys.platform == "darwin":
+        gui_backend = "cef"
+    else:
+        gui_backend = "qt"
+
     current_window = webview.create_window(
         title='WorkTre',
         url=f'file://{html_path}',
@@ -2399,8 +2447,7 @@ def inactivity_window(api, html_file):
         minimized=False
     )
 
-    # You can change 'edgechromium' to 'tkinter' here if needed
-    webview.start(debug=False, gui='edgechromium', func=set_window_icon)
+    webview.start(debug=False, gui=gui_backend, func=set_window_icon)
 
 
 # ---------------------- Entry Point ----------------------
