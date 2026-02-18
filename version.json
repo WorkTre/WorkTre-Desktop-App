@@ -1,4 +1,17 @@
 {
   "version": "2.2.1",
-  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.1/WorkTreInstaller.exe"
+  "required": false,
+  "release_notes": "• Fixed cross-platform update issues\n• Improved performance\n• Bug fixes",
+  "windows": {
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.1/WorkTre_2.2.1_Setup.exe",
+    "checksum": "sha256_hash_here"
+  },
+  "macos": {
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.1/WorkTre_2.2.1.dmg",
+    "checksum": "sha256_hash_here"
+  },
+  "linux": {
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.1/WorkTre_2.2.1.AppImage",
+    "checksum": "sha256_hash_here"
+  }
 }
