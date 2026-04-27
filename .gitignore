@@ -1,7 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
 .venv/
-.idea/
-dist/
+venv/
+env/
+ENV/
+
+# Build outputs
 build/
+dist/
+*.exe
+*.dmg
+*.AppImage
 Output/
 
-__pycache__/
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Application data
+remember_me.json
+remember_me.key
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db

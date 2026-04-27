@@ -1,16 +1,16 @@
-#libsass
-#watchdog  # optional, for live reload
-pywebview~=6.1
-requests~=2.32.5
-portalocker~=3.2.0
-pillow~=12.0.0
-cryptography~=46.0.3
-packaging~=25.0
-plyer~=2.1.0
-pystray~=0.19.5
-psutil~=7.2.0
-pywin32~=311
+# requirements.txt
+# Core dependencies
+pywebview>=4.0.0
+pystray>=0.19.0
+Pillow>=10.0.0
+plyer>=2.0.0
+requests>=2.31.0
+cryptography>=41.0.0
+packaging>=23.0.0
+portalocker>=2.8.0
 
+# Platform-specific (installed automatically on Windows)
+pywin32>=306; sys_platform == 'win32'
 
-# Optional platform-specific
-# These are handled by setup.py conditional dependencies
+# Optional for better UI
+psutil>=5.9.0

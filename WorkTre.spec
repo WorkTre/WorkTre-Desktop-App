@@ -1,11 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-
 a = Analysis(
-    ['main.py'],
+    ['src/main.py'],
     pathex=[],
     binaries=[],
-    datas=[('setup.ico', '.'), ('index.html', '.'), ('splash.png', '.'), ('assets', 'assets'), ('version.txt', '.'), ('icon.ico', '.')],
+    datas=[('src/assets/icons/setup.ico', '.'), ('src/assets/index.html', '.'), ('src/assets/images/splash.png', '.'), ('src/assets', 'assets'), ('src/assets/version.txt', '.'), ('src/assets/icons/icon.ico', '.')],
     hiddenimports=['plyer.platforms.win.notification'],
     hookspath=[],
     hooksconfig={},
@@ -32,7 +31,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['icon.ico'],
+    icon=['src/assets/icons/icon.ico'],
 )
 coll = COLLECT(
     exe,
