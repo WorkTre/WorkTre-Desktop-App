@@ -50,18 +50,33 @@ class InactivityManager:
             return self._get_linux_idle_time()
 
     def _get_windows_idle_time(self) -> float:
-        """Get idle time on Windows."""
+        """Get system idle time in seconds on Windows."""
         try:
             import ctypes
-            class LASTINPUTINFO(ctypes.Structure):
-                _fields_ = [("cbSize", ctypes.c_uint),
-                           ("dwTime", ctypes.c_uint)]
+            from ctypes import wintypes
 
-            lastInputInfo = LASTINPUTINFO()
-            lastInputInfo.cbSize = ctypes.sizeof(lastInputInfo)
-            ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lastInputInfo))
-            millis = ctypes.windll.kernel32.GetTickCount() - lastInputInfo.dwTime
-            return millis / 1000.0
+            class LASTINPUTINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.UINT),
+                           ("dwTime", wintypes.DWORD)]
+
+            lii = LASTINPUTINFO()
+            lii.cbSize = ctypes.sizeof(lii)
+            
+            if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(lii)):
+                return 0.0
+
+            # GetTickCount returns the number of milliseconds since the system was started.
+            # dwTime is also a 32-bit DWORD from GetTickCount.
+            current_tick = ctypes.windll.kernel32.GetTickCount()
+            
+            # 32-bit unsigned subtraction handles rollover automatically in Python with & 0xFFFFFFFF
+            idle_ms = (current_tick - lii.dwTime) & 0xFFFFFFFF
+            
+            # Debug logging every 30 seconds of idle time to help diagnose issues
+            if idle_ms > 0 and (idle_ms // 1000) % 30 == 0:
+                self.logger.debug(f"Windows Idle: current={current_tick}, last={lii.dwTime}, idle_ms={idle_ms}")
+                
+            return idle_ms / 1000.0
         except Exception as e:
             self.logger.error(f"Failed to get Windows idle time: {e}")
             return 0.0
@@ -118,7 +133,7 @@ class InactivityManager:
 
     def _monitor_activity(self):
         """Monitor user activity in background thread."""
-        self.logger.info(f"Inactivity monitor started (warn: {self._warning_timeout}s, logout: {self._logout_timeout}s)")
+        self.logger.info(f"Inactivity monitor started (Thresholds: warn={self._warning_timeout}s, logout={self._logout_timeout}s)")
 
         while not self._stop_event.is_set():
             try:
@@ -129,30 +144,33 @@ class InactivityManager:
                 idle_time = self._get_idle_time()
 
                 # Check for warning timeout
-                if not self._warning_triggered and idle_time >= self._warning_timeout:
-                    self.logger.warning(f"Inactivity warning triggered ({idle_time:.0f}s idle)")
-                    self._warning_triggered = True
-                    self._warning_time = time.time()
-                    if self._on_warning:
-                        threading.Thread(target=self._on_warning, daemon=True).start()
+                if not self._warning_triggered:
+                    if idle_time >= self._warning_timeout:
+                        self.logger.warning(f"🚨 Inactivity threshold reached: {idle_time:.1f}s >= {self._warning_timeout}s")
+                        self._warning_triggered = True
+                        self._warning_time = time.time()
+                        if self._on_warning:
+                            threading.Thread(target=self._on_warning, daemon=True).start()
+                else:
+                    # Warning already triggered, check for logout or reset
+                    if idle_time < 1.0: # User moved mouse/keyboard (idle time reset)
+                        # We don't necessarily reset the warning modal here if the app design
+                        # requires a manual "Resume", but we should log it.
+                        self.logger.debug("User activity detected during warning period")
+                        # self._warning_triggered = False # Uncomment if we want auto-reset
 
-                # Check for logout timeout
-                if self._warning_triggered and self._warning_time > 0:
-                    time_in_warning = time.time() - self._warning_time
-                    if time_in_warning >= max(0, self._logout_timeout - self._warning_timeout):
-                        self.logger.warning(f"Inactivity logout triggered ({time_in_warning:.0f}s on break)")
-                        if self._on_logout:
-                            threading.Thread(target=self._on_logout, daemon=True).start()
-                        self._user_logged_in = False
-                        self._warning_triggered = False
-                        self._warning_time = 0.0
-                elif not self._warning_triggered and idle_time >= self._logout_timeout:
-                    # Fallback in case warning wasn't triggered
-                    self.logger.warning(f"Inactivity logout triggered ({idle_time:.0f}s idle)")
-                    if self._on_logout:
-                        threading.Thread(target=self._on_logout, daemon=True).start()
-                    self._user_logged_in = False
-                    self._warning_triggered = False
+                    # Check for logout timeout
+                    if self._warning_time > 0:
+                        time_since_warning = time.time() - self._warning_time
+                        logout_threshold = max(10, self._logout_timeout - self._warning_timeout)
+                        
+                        if time_since_warning >= logout_threshold:
+                            self.logger.warning(f"🚨 Inactivity logout threshold reached: {time_since_warning:.1f}s")
+                            if self._on_logout:
+                                threading.Thread(target=self._on_logout, daemon=True).start()
+                            self._user_logged_in = False
+                            self._warning_triggered = False
+                            self._warning_time = 0.0
 
                 time.sleep(1)  # Check every second
 

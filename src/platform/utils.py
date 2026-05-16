@@ -142,6 +142,31 @@ def show_confirmation_dialog(title, message, parent_window=None):
         return _tkinter_confirmation_dialog(title, message, parent_window)
 
 
+def force_window_to_top(hwnd, topmost=True):
+    """Force a window to the top and optionally set/unset topmost on Windows."""
+    if sys.platform != "win32" or not hwnd:
+        return
+
+    import ctypes
+    user32 = ctypes.windll.user32
+    
+    # Constants
+    HWND_TOPMOST = -1
+    HWND_NOTOPMOST = -2
+    SWP_NOMOVE = 0x0002
+    SWP_NOSIZE = 0x0001
+    SWP_SHOWWINDOW = 0x0040
+    
+    target = HWND_TOPMOST if topmost else HWND_NOTOPMOST
+    
+    # Set topmost/notopmost
+    user32.SetWindowPos(hwnd, target, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+    
+    if topmost:
+        # Bring to foreground
+        user32.SetForegroundWindow(hwnd)
+        user32.SetActiveWindow(hwnd)
+
 def _windows_confirmation_dialog(title, message):
     """Windows-specific confirmation dialog using native API."""
     import ctypes
@@ -151,16 +176,18 @@ def _windows_confirmation_dialog(title, message):
 
     MB_YESNO = 0x04
     MB_ICONQUESTION = 0x20
-    MB_TASKMODAL = 0x2000
+    MB_SYSTEMMODAL = 0x1000
+    MB_SETFOREGROUND = 0x10000
     MB_TOPMOST = 0x40000
     IDYES = 6
 
-    hwnd = user32.GetForegroundWindow()
+    # MB_SYSTEMMODAL ensures the dialog takes global focus and stays on top.
+    # MB_SETFOREGROUND forces it to the foreground of the current thread.
     result = user32.MessageBoxW(
-        hwnd,
+        0,
         message,
         title,
-        MB_YESNO | MB_ICONQUESTION | MB_TASKMODAL | MB_TOPMOST
+        MB_YESNO | MB_ICONQUESTION | MB_SYSTEMMODAL | MB_SETFOREGROUND | MB_TOPMOST
     )
     return result == IDYES
 
@@ -287,7 +314,7 @@ def get_system_info():
 def create_single_instance_lock(app_name="WorkTre"):
     """
     Create a single instance lock file.
-    Returns (lock_successful, lock_file_path)
+    Returns (lock_successful, lock_file_path, lock_handle)
     """
     lock_dir = get_temp_dir(app_name)
     lock_file = os.path.join(lock_dir, f"{app_name}.lock")
@@ -295,12 +322,12 @@ def create_single_instance_lock(app_name="WorkTre"):
     try:
         lock_handle = open(lock_file, 'w')
         portalocker.lock(lock_handle, portalocker.LOCK_EX | portalocker.LOCK_NB)
-        return True, lock_file
+        return True, lock_file, lock_handle
     except (portalocker.exceptions.LockException, IOError):
-        return False, lock_file
+        return False, lock_file, None
     except Exception as e:
         print(f"Lock error: {e}")
-        return False, lock_file
+        return False, lock_file, None
 
 
 def cleanup_temp_files(app_name="WorkTre"):

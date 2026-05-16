@@ -11,6 +11,7 @@ let breakType = "";
 let breakComment = "";
 let currentHourPassed = 0;
 let currentMinutePassed = 0;
+let currentPassedSeconds = 0;
 let breakMinutesPassed = 0;
 let totalBreakMinutes = 60;
 let currentPage = 1;
@@ -252,12 +253,16 @@ async function handleLogin(e) {
             console.log('📥 Object response:', data);
         }
 
-        const { status, data: userData } = data;
+        const { status, data: userData, msg } = data;
 
         if (status && userData && Object.keys(userData).length > 0) {
-            await handleSuccessfulLogin(userData, email);
+            if (userData.UnapprovedIpRequestFound) {
+                handleLoginFailure(userData.UnapprovedIpRequestFound, userData);
+            } else {
+                await handleSuccessfulLogin(userData, email);
+            }
         } else {
-            handleLoginFailure(userData);
+            handleLoginFailure(msg, userData);
         }
     } catch (err) {
         console.error("Login failed:", err);
@@ -356,7 +361,7 @@ async function handleSuccessfulLogin(userData, email) {
 
     // After the required APIs are called, start background intervals and fetch extra UI data
     if (window.pywebview?.api?.start_app_intervals) {
-        await window.pywebview.api.start_app_intervals(userData);
+        await window.pywebview.api.start_app_intervals(userData, getServiceResponse);
     }
 
     // Get break types
@@ -382,14 +387,32 @@ async function showLoginSuccessNotification(email) {
 }
 
 /**
+ * Show logout notification
+ */
+async function showLogoutNotification(email) {
+    if (window.pywebview?.api?.show_logout_notification) {
+        await window.pywebview.api.show_logout_notification(email);
+    }
+}
+
+/**
  * Handle login failure
  */
-function handleLoginFailure(userData) {
-    if (userData?.IPAddresNotFound === 'Invalid IP Address') {
-        alert("Your IP address is not registered.");
-
-        if (loginErrorNotify) {
-            loginErrorNotify.innerHTML = `Your IP is not registered with WorkTre. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
+function handleLoginFailure(msg, userData) {
+    if (userData?.UnapprovedIpRequestFound) {
+        const errorEl = document.getElementById("login_error");
+        if (errorEl) {
+            errorEl.innerHTML = userData.UnapprovedIpRequestFound;
+            setTimeout(() => {
+                if (errorEl.innerHTML === userData.UnapprovedIpRequestFound) {
+                    errorEl.innerHTML = "&nbsp;";
+                }
+            }, 5000);
+        }
+    } else if (userData?.IPAddresNotFound === 'Invalid IP Address') {
+        const errorEl = document.getElementById("login_error");
+        if (errorEl) {
+            errorEl.innerHTML = `Your IP is not registered with WorkTre. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
 
             setTimeout(() => {
                 const ipLink = document.getElementById('ip_request');
@@ -407,7 +430,14 @@ function handleLoginFailure(userData) {
             loginErrorNotify.innerHTML = "You are already logged in to another system, please logout there to login here.";
         }
     } else {
-        alert("Invalid username or password.");
+        // If backend provided a meaningful message (network/server/etc), show it.
+        // This prevents incorrectly showing "Invalid username or password" when the SOAP call never reached the server.
+        const cleanMsg = (typeof msg === 'string' && msg.trim()) ? msg.trim() : "";
+        if (cleanMsg) {
+            alert(cleanMsg);
+        } else {
+            alert("Invalid username or password.");
+        }
     }
 }
 
@@ -531,6 +561,8 @@ async function requestForAccessAPI(uid) {
 
         if (resData.status) {
             alert(`Your request for login with ${resData.data?.ip || 'unknown'} IP has been sent successfully. You will get a confirmation email once your request is approved.`);
+            const errorEl = document.getElementById("login_error");
+            if (errorEl) errorEl.innerHTML = "&nbsp;";
         } else {
             alert(`Request failed: ${resData.message || "Unknown error."}`);
         }
@@ -632,6 +664,45 @@ async function updateDashboardWithUserData(userData, serviceData) {
 
     const totalShiftMinutes = Math.floor((endDate - startDate) / (1000 * 60));
     const { hours: resumeHour, minutes: resumeMinute } = parsePassedTime(passedTime);
+    
+    // Calculate server-reported seconds
+    const serverPassedSeconds = (resumeHour * 3600) + (resumeMinute * 60);
+    
+    // Safety: If server says 0 but we have a login time and it's today, 
+    // calculate local elapsed time as a fallback to prevent the "9:00" jump.
+    let finalResumeSeconds = serverPassedSeconds;
+    
+    try {
+        const loginDate = new Date();
+        const [lTime, lAmpm] = loginTime.split(' ');
+        let [lHrs, lMins] = lTime.split(':').map(Number);
+        if (lAmpm?.toLowerCase() === 'pm' && lHrs !== 12) lHrs += 12;
+        if (lAmpm?.toLowerCase() === 'am' && lHrs === 12) lHrs = 0;
+        loginDate.setHours(lHrs, lMins, 0, 0);
+        
+        const localElapsedSeconds = Math.floor((new Date() - loginDate) / 1000);
+        const totalBreakSeconds = parseInt(serviceData?.["2)- totalBreakTime"] || 0);
+        const adjustedLocalSeconds = Math.max(0, localElapsedSeconds - totalBreakSeconds);
+        
+        // If server is lagging significantly (more than 2 mins) and we have no breaks or local is ahead,
+        // use the local adjusted time to keep the clock "actual" as requested.
+        if (adjustedLocalSeconds > serverPassedSeconds + 120) {
+            console.log(`⏱️ Server lagging (${serverPassedSeconds}s vs local ${adjustedLocalSeconds}s). Using local time.`);
+            finalResumeSeconds = adjustedLocalSeconds;
+        }
+    } catch (e) {
+        console.warn("Failed to calculate local elapsed time fallback:", e);
+    }
+
+    // Prevent backwards jumps if timer is already running and difference is small
+    if (currentPassedSeconds > finalResumeSeconds && (currentPassedSeconds - finalResumeSeconds) < 600) {
+        console.log("⏱️ Ignoring backwards timer jump from server sync");
+        finalResumeSeconds = currentPassedSeconds;
+    }
+
+    currentPassedSeconds = finalResumeSeconds;
+    currentHourPassed = Math.floor(finalResumeSeconds / 3600);
+    currentMinutePassed = Math.floor((finalResumeSeconds % 3600) / 60);
 
     if (loginErrorNotify) loginErrorNotify.innerHTML = "&nbsp;";
 
@@ -660,7 +731,9 @@ async function updateDashboardWithUserData(userData, serviceData) {
     resetAllTimers();
     createShiftTicks(totalShiftMinutes);
     createBreakTicks();
-    startShiftTimer(totalShiftMinutes, resumeHour, resumeMinute);
+    
+    // Pass total minutes and resume seconds
+    startShiftTimer(totalShiftMinutes, currentPassedSeconds);
 
     console.log('✅ Dashboard updated successfully');
 }
@@ -799,8 +872,10 @@ function parseTime(timeStr) {
  * Parse passed time string
  */
 function parsePassedTime(passedStr) {
-    if (!passedStr) return { hours: 0, minutes: 0 };
-    const [hours, minutes] = passedStr.split(":").map(Number);
+    if (!passedStr || typeof passedStr !== 'string') return { hours: 0, minutes: 0 };
+    const parts = passedStr.split(":");
+    const hours = parseInt(parts[0]) || 0;
+    const minutes = parseInt(parts[1]) || 0;
     return { hours, minutes };
 }
 
@@ -881,72 +956,80 @@ function createBreakTicks() {
 }
 
 /**
- * Start shift timer
+ * Start shift timer with 1-second updates
  */
-function startShiftTimer(totalShiftMinutes, resumeHour = 0, resumeMinute = 0) {
+function startShiftTimer(totalShiftMinutes, resumeSeconds = 0) {
     const shiftTimer = document.getElementById("shiftTimer");
-    const fillRing = document.getElementById("fillRing");
     const hourLabel = document.getElementById("hourLabel");
+    const fillRing = document.getElementById("fillRing");
 
-    if (!shiftTimer || !fillRing || !hourLabel) return;
+    if (!shiftTimer || !hourLabel || !fillRing) return;
 
-    currentHourPassed = resumeHour;
-    currentMinutePassed = resumeMinute;
+    currentPassedSeconds = resumeSeconds;
+    currentHourPassed = Math.floor(resumeSeconds / 3600);
+    currentMinutePassed = Math.floor((resumeSeconds % 3600) / 60);
 
-    shiftTimer.style.display = "block";
-    const breakTimer = document.getElementById("breakTimer");
-    if (breakTimer) breakTimer.style.display = "none";
+    const totalShiftSeconds = totalShiftMinutes * 60;
 
     if (!shiftTicks.length) createShiftTicks(totalShiftMinutes);
 
-    let elapsed = currentHourPassed * 60 + currentMinutePassed;
-    let remaining = totalShiftMinutes - elapsed;
-
-    // Mark previously completed ticks
-    for (let i = 0; i < Math.floor(elapsed / 60); i++) {
-        if (shiftTicks[i]) shiftTicks[i].classList.add("active");
-    }
-
-    // Initial ring update
-    const angle = (elapsed / totalShiftMinutes) * 360;
-    fillRing.style.background = `conic-gradient(#0aebc1 ${angle}deg, white ${angle}deg)`;
-
-    // Update label
-    let hrs = Math.floor(remaining / 60);
-    let mins = remaining % 60;
-    hourLabel.innerText = `${hrs}:${mins.toString().padStart(2, '0')}`;
+    // Initial update
+    updateShiftUI(totalShiftSeconds, hourLabel, fillRing);
 
     // Clear existing interval
     if (shiftTimerInterval) clearInterval(shiftTimerInterval);
 
-    // Start interval
+    // Start 1-second interval for smooth updates
     shiftTimerInterval = setInterval(() => {
-        elapsed = currentHourPassed * 60 + currentMinutePassed;
-        remaining = totalShiftMinutes - elapsed;
+        currentPassedSeconds++;
+        currentHourPassed = Math.floor(currentPassedSeconds / 3600);
+        currentMinutePassed = Math.floor((currentPassedSeconds % 3600) / 60);
+        updateShiftUI(totalShiftSeconds, hourLabel, fillRing);
+    }, 1000);
+}
 
-        const angle = (elapsed / totalShiftMinutes) * 360;
+/**
+ * Helper to update Shift UI
+ */
+function updateShiftUI(totalShiftSeconds, hourLabel, fillRing) {
+    // Defensive check
+    if (!totalShiftSeconds || isNaN(totalShiftSeconds)) {
+        totalShiftSeconds = 9 * 3600; // Fallback to 9 hours if invalid
+    }
+
+    const isOvertime = currentPassedSeconds > totalShiftSeconds;
+    let displaySeconds;
+    
+    if (isOvertime) {
+        displaySeconds = currentPassedSeconds - totalShiftSeconds;
+        const h = Math.floor(displaySeconds / 3600);
+        const m = Math.floor((displaySeconds % 3600) / 60);
+        
+        // Show overtime with a "+"
+        hourLabel.innerText = `+${h}:${m.toString().padStart(2, '0')}`;
+        hourLabel.style.color = "#ffffff"; // White text for overtime (visible on red)
+        
+        // Fill ring remains full red
+        fillRing.style.background = `conic-gradient(#ff4d4d 360deg, white 360deg)`;
+    } else {
+        displaySeconds = totalShiftSeconds - currentPassedSeconds;
+        const h = Math.floor(displaySeconds / 3600);
+        const m = Math.floor((displaySeconds % 3600) / 60);
+        const s = displaySeconds % 60;
+        
+        hourLabel.innerText = `${h}:${m.toString().padStart(2, '0')}`;
+        hourLabel.style.color = ""; // Default color
+        
+        const angle = (currentPassedSeconds / totalShiftSeconds) * 360;
         fillRing.style.background = `conic-gradient(#0aebc1 ${angle}deg, white ${angle}deg)`;
+    }
 
-        const completedHour = Math.floor(elapsed / 60);
-        if (completedHour < shiftTicks.length) {
-            shiftTicks[completedHour].classList.add("active");
-        }
-
-        hrs = Math.floor(remaining / 60);
-        mins = remaining % 60;
-        hourLabel.innerText = `${hrs}:${mins.toString().padStart(2, '0')}`;
-
-        currentMinutePassed++;
-        if (currentMinutePassed >= 60) {
-            currentMinutePassed = 0;
-            currentHourPassed++;
-        }
-
-        if (elapsed >= totalShiftMinutes) {
-            clearInterval(shiftTimerInterval);
-            hourLabel.innerText = `0:00`;
-        }
-    }, 60000);
+    // Update ticks (every hour)
+    const elapsedMinutes = Math.floor(currentPassedSeconds / 60);
+    const completedHours = Math.floor(elapsedMinutes / 60);
+    for (let i = 0; i < completedHours; i++) {
+        if (shiftTicks[i]) shiftTicks[i].classList.add("active");
+    }
 }
 
 /**
@@ -1080,7 +1163,7 @@ function resumeShiftTimer() {
     if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
 
     const totalShiftMinutes = Math.floor((endDate - startDate) / (1000 * 60));
-    startShiftTimer(totalShiftMinutes, currentHourPassed, currentMinutePassed);
+    startShiftTimer(totalShiftMinutes, currentPassedSeconds);
 }
 
 // ==================== BREAK HANDLING ====================
@@ -1159,7 +1242,7 @@ async function handleBreakEnd() {
         if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
 
         const totalShiftMinutes = Math.floor((endDate - startDate) / (1000 * 60));
-        startShiftTimer(totalShiftMinutes, currentHourPassed, currentMinutePassed);
+        startShiftTimer(totalShiftMinutes, currentPassedSeconds);
 
         const playBtn = document.getElementById("play");
         if (playBtn) {
@@ -1617,6 +1700,12 @@ async function showInactivityModal() {
             keyboard: false
         });
     }
+
+    // Set window to topmost for highest priority
+    if (window.pywebview?.api?.set_topmost) {
+        await window.pywebview.api.set_topmost(true);
+    }
+
     modalInstance.show();
 
     // Force window to maintain its size
@@ -1643,6 +1732,11 @@ function hideInactivityModal() {
             modalInstance.hide();
         }
     }
+
+    // Unset topmost
+    if (window.pywebview?.api?.set_topmost) {
+        window.pywebview.api.set_topmost(false);
+    }
 }
 
 /**
@@ -1662,7 +1756,7 @@ function handleBreakModalClose() {
         if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
 
         const totalShiftMinutes = Math.floor((endDate - startDate) / (1000 * 60));
-        startShiftTimer(totalShiftMinutes, currentHourPassed, currentMinutePassed);
+        startShiftTimer(totalShiftMinutes, currentPassedSeconds);
     }
 
     const breakForm = document.querySelector("#break form");
@@ -1674,13 +1768,37 @@ function handleBreakModalClose() {
 /**
  * Show break logs
  */
-function showBreakLogs() {
+async function showBreakLogs() {
     setElementDisplay("break_logs_content", "block");
     setElementDisplay("dashboard_content", "none");
     setElementDisplay("notifications_content", "none");
     setElementDisplay("settings_content", "none");
     setElementDisplay("profile_content", "none");
     setElementDisplay("back_button", "block");
+
+    try {
+        const userDataStr = localStorage.getItem("user_data");
+        if (userDataStr) {
+            const userData = JSON.parse(userDataStr);
+            if (userData && userData.EID) {
+                showLoader();
+                const serviceData = await getServiceAPI(userData.EID);
+                if (serviceData) {
+                    const breakDetails = serviceData["3)- breakDetails"] || "";
+                    const logData = convertLogToFormattedObjects(breakDetails);
+                    
+                    // Save globally and re-render
+                    paginatedLogData = logData;
+                    currentPage = 1;
+                    renderLogsToTable(paginatedLogData, '.logs-tbl tbody', currentPage);
+                }
+            }
+        }
+    } catch (err) {
+        console.error("Failed to load break logs on tab click:", err);
+    } finally {
+        hideLoader();
+    }
 }
 
 /**
@@ -1772,6 +1890,10 @@ async function logoutAPI() {
                 userData.TotalBillableChat || 0
             );
         }
+
+        // Show logout notification
+        const email = userData.Email || userData.username || "User";
+        await showLogoutNotification(email);
 
         setElementDisplay("dashboard", "none");
         setElementDisplay("loginPage", "block");

@@ -22,9 +22,10 @@ from ..config import constants
 class NotificationManager:
     """Cross-platform notification manager."""
 
-    def __init__(self, app_name: str, window_getter=None, logger=None):
+    def __init__(self, app_name: str, window_getter=None, tray_manager_getter=None, logger=None):
         self.app_name = app_name
         self.window_getter = window_getter
+        self.tray_manager_getter = tray_manager_getter
         self.logger = logger or self._get_default_logger()
 
         self._notification_queue = queue.Queue()
@@ -75,10 +76,33 @@ class NotificationManager:
             notification_type = notification.get('type', constants.NOTIFICATION_INFO)
             duration = notification.get('duration', 5)
 
+            self.logger.info(f"📣 Delivering notification: [{title}] {message}")
+
+            # Try tray notification on Windows first (more reliable than plyer)
+            tray_success = False
+            if sys.platform == "win32" and self.tray_manager_getter:
+                try:
+                    tray = self.tray_manager_getter()
+                    if tray and hasattr(tray, 'notify'):
+                        self.logger.debug("Using Tray notification method")
+                        tray.notify(message, title)
+                        tray_success = True
+                    else:
+                        self.logger.warning("Tray manager not available or has no notify() method")
+                except Exception as e:
+                    self.logger.error(f"Tray notification failed: {e}")
+
             # Platform-specific notification
-            if PLYER_AVAILABLE and self._should_use_plyer():
+            # On Windows, we only use Plyer if the Tray notification failed
+            should_use_plyer = PLYER_AVAILABLE and self._should_use_plyer()
+            if sys.platform == "win32" and tray_success:
+                should_use_plyer = False
+
+            if should_use_plyer:
+                self.logger.debug(f"Using Plyer notification method")
                 self._show_plyer_notification(title, message, duration)
-            else:
+            elif sys.platform != "win32" or not tray_success:
+                self.logger.debug("Using Fallback notification method")
                 self._show_fallback_notification(title, message, notification_type)
 
             # Also show in-app notification if window is available
