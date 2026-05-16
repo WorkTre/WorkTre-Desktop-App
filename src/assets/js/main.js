@@ -965,6 +965,11 @@ function startShiftTimer(totalShiftMinutes, resumeSeconds = 0) {
 
     if (!shiftTimer || !hourLabel || !fillRing) return;
 
+    // Ensure shift timer is visible and break timer is hidden
+    shiftTimer.style.display = "block";
+    const breakTimer = document.getElementById("breakTimer");
+    if (breakTimer) breakTimer.style.display = "none";
+
     currentPassedSeconds = resumeSeconds;
     currentHourPassed = Math.floor(resumeSeconds / 3600);
     currentMinutePassed = Math.floor((resumeSeconds % 3600) / 60);
