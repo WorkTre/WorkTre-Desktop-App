@@ -388,6 +388,7 @@ def show_confirmation_dialog(title: str, message: str, parent: Any = None,
     try:
         if parent is None:
             root.withdraw()
+            root.attributes('-topmost', True)
 
         if show_cancel:
             # Custom dialog with Cancel button

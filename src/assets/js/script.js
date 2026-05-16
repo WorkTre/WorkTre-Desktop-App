@@ -623,6 +623,19 @@
             console.log(data)
 //            return
             if (status && Object.keys(data).length>0) {
+                if (data.UnapprovedIpRequestFound) {
+                    const errorEl = document.getElementById("login_error");
+                    if (errorEl) {
+                        errorEl.innerHTML = data.UnapprovedIpRequestFound;
+                        setTimeout(() => {
+                            if (errorEl.innerHTML === data.UnapprovedIpRequestFound) {
+                                errorEl.innerHTML = "&nbsp;";
+                            }
+                        }, 5000);
+                    }
+                    hideLoader();
+                    return;
+                }
 
                 localStorage.setItem("user_data", JSON.stringify(data));
 
@@ -688,8 +701,10 @@
 
             } else {
                 if(data.IPAddresNotFound === 'Invalid IP Address'){
-                     alert("Your IP address is not registered.");
-                    loginErrorNotify.innerHTML = `Your IP is not registered with WORKTRE. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
+                    const errorEl = document.getElementById("login_error");
+                    if (errorEl) {
+                        errorEl.innerHTML = `Your IP is not registered with WorkTre. Please <a href="#" id="ip_request">Click Here</a> to send a request for access.`;
+                    }
 
                     setTimeout(() => {
                         const ipLink = document.getElementById('ip_request');
@@ -853,13 +868,36 @@
         document.querySelector("#break form")?.reset();
     });
 
-    document.getElementById("break_logs").addEventListener("click", () => {
+    document.getElementById("break_logs").addEventListener("click", async () => {
         document.getElementById("break_logs_content").style.display = "block";
         document.getElementById("dashboard_content").style.display = "none";
         document.getElementById("notifications_content").style.display = "none";
         document.getElementById("settings_content").style.display = "none";
         document.getElementById("profile_content").style.display = "none";
         document.getElementById("back_button").style.display = "block";
+
+        try {
+            const userDataStr = localStorage.getItem("user_data");
+            if (userDataStr) {
+                const userData = JSON.parse(userDataStr);
+                if (userData && userData.EID) {
+                    showLoader();
+                    const getServiceResponse = await api.getservice(userData.EID);
+                    if (getServiceResponse) {
+                        const breakDetails = getServiceResponse["3)- breakDetails"];
+                        const logData = convertLogToFormattedObjects(breakDetails);
+
+                        paginatedLogData = logData;
+                        currentPage = 1;
+                        renderLogsToTable(paginatedLogData, '.logs-tbl tbody', currentPage);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            hideLoader();
+        }
     });
 
     document.getElementById("main-dashboard-logo").addEventListener("click", () => {
@@ -1077,6 +1115,8 @@
 
             if (resData.status) {
                 alert(`Your request for login with ${resData.data.ip} IP has been sent successfully. You will get a confirmation email once your request is approved.`);
+                const errorEl = document.getElementById("login_error");
+                if (errorEl) errorEl.innerHTML = "&nbsp;";
             } else {
                 alert(`Request failed: ${resData.message || "Unknown error."}`);
             }

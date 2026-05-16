@@ -303,6 +303,15 @@ class CrossPlatformTrayManager:
             except Exception as e:
                 self._log(f"Failed to minimize to tray: {e}")
 
+    def notify(self, message, title=None):
+        """Show a tray notification."""
+        if self._icon:
+            try:
+                self._icon.notify(message, title or self.app_name)
+                self._log(f"Tray notification shown: {message}")
+            except Exception as e:
+                self._log(f"Failed to show tray notification: {e}")
+
     def quit(self):
         """Quit application with confirmation."""
         if self.is_updating_checker and self.is_updating_checker():
@@ -312,10 +321,31 @@ class CrossPlatformTrayManager:
             )
             return
 
-        confirmed = show_confirmation_dialog(
-            f"Quit {self.app_name}",
-            f"Are you sure you want to quit {self.app_name}?"
-        )
+        window = self.window_getter()
+        
+        # Use pywebview's built-in dialog if window is available, 
+        # as it handles focus and parenting much better than a standalone dialog.
+        if window:
+            try:
+                # Restore window to ensure the dialog is visible and focused
+                window.show()
+                window.restore()
+                
+                confirmed = window.create_confirmation_dialog(
+                    f"Quit {self.app_name}",
+                    f"Are you sure you want to quit {self.app_name}?"
+                )
+            except Exception as e:
+                self._log(f"Built-in dialog failed: {e}")
+                confirmed = show_confirmation_dialog(
+                    f"Quit {self.app_name}",
+                    f"Are you sure you want to quit {self.app_name}?"
+                )
+        else:
+            confirmed = show_confirmation_dialog(
+                f"Quit {self.app_name}",
+                f"Are you sure you want to quit {self.app_name}?"
+            )
 
         if not confirmed:
             self._log("User canceled quit")

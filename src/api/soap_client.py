@@ -41,6 +41,9 @@ class SOAPClient:
 
         # Session for connection pooling
         self.session = requests.Session()
+        # Prefer system proxy settings when present (common in corporate networks)
+        # and keep behavior consistent between "python -m" and frozen builds.
+        self.session.trust_env = True
         self.session.headers.update({
             "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml",
@@ -99,6 +102,10 @@ class SOAPClient:
                 self._last_request_time = datetime.now()
                 self._request_count += 1
 
+                self.logger.debug(
+                    f"SOAP POST base_url={self.base_url} action={action} attempt={attempt + 1}/{self.retry_count}"
+                )
+
                 response = self.session.post(
                     self.base_url,
                     data=payload,
@@ -119,10 +126,10 @@ class SOAPClient:
 
             except requests.exceptions.Timeout:
                 self.logger.warning(f"Timeout for {action}, attempt {attempt + 1}")
-            except requests.exceptions.ConnectionError:
-                self.logger.warning(f"Connection error for {action}, attempt {attempt + 1}")
+            except requests.exceptions.ConnectionError as e:
+                self.logger.warning(f"Connection error for {action}, attempt {attempt + 1}: {e}")
             except Exception as e:
-                self.logger.error(f"Request failed for {action}: {e}")
+                self.logger.error(f"Request failed for {action}: {e}", exc_info=True)
 
             # Wait before retry
             if attempt < self.retry_count - 1:

@@ -9,6 +9,7 @@ import json
 import threading
 import time
 import queue
+import portalocker
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, List
 
@@ -25,6 +26,7 @@ from src.platform.utils import (
     cleanup_temp_files,
     get_app_data_dir,
     get_icon_path,
+    force_window_to_top,
 )
 from src.ui.window import AppWindow
 
@@ -143,6 +145,11 @@ class WorkTreApp:
         self.connectivity_manager = None
         self.system_monitor = None
 
+        # Application lifecycle
+        self._running = True
+        self.lock_file = None
+        self.lock_handle = None
+
         # Lazy loaded modules
         self.lazy = LazyLoader()
 
@@ -260,7 +267,7 @@ class WorkTreApp:
 
     def _check_single_instance(self) -> bool:
         """Ensure only one instance is running."""
-        locked, lock_file = create_single_instance_lock(APP_NAME)
+        locked, lock_file, lock_handle = create_single_instance_lock(APP_NAME)
         if not locked:
             self.logger.warning("Another instance is already running")
             if not self.state.restore_requested:
@@ -272,6 +279,7 @@ class WorkTreApp:
             return False
 
         self.lock_file = lock_file
+        self.lock_handle = lock_handle # Store handle to keep lock alive
         return True
 
     def _setup_directories(self):
@@ -320,8 +328,10 @@ class WorkTreApp:
         """Start a background thread to monitor window size"""
 
         def monitor():
-            while True:
+            while self._running:
                 time.sleep(2)
+                if not self._running:
+                    break
                 if self.state.is_logged_in and self.window_size_locked:
                     self.check_window_size()
 
@@ -353,6 +363,9 @@ class WorkTreApp:
 
         # Load remembered credentials in background
         threading.Thread(target=self._load_credentials_bg, daemon=True).start()
+
+        # Start login reminder thread
+        threading.Thread(target=self._login_reminder_loop, daemon=True).start()
 
     def _init_security_bg(self):
         """Initialize security in background."""
@@ -398,6 +411,7 @@ class WorkTreApp:
             self.notification_manager = notif_module.NotificationManager(
                 app_name=APP_NAME,
                 window_getter=lambda: self.window.window if self.window else None,
+                tray_manager_getter=lambda: self.tray_manager,
                 logger=self.logger
             )
             self.notification_manager.start()
@@ -519,17 +533,84 @@ class WorkTreApp:
                 f"Are you sure you want to quit {APP_NAME}?"
             )
             if confirmed:
-                self.quit()
-            return False  # Always return False. If confirmed, self.quit() will force kill the app.
+                self.logger.info("User confirmed quit via window cross")
+                self._running = False
+                return True  # Allow window to destroy
+            return False  # Stay open
+
+    def _login_reminder_loop(self):
+        """Show a notification every 5 minutes if the user is not logged in."""
+        last_reminder_time = 0
+        self.logger.info("Login reminder loop started")
+        
+        while self._running:
+            try:
+                # Check every minute
+                time.sleep(60)
+                
+                if not self._running:
+                    break
+                
+                current_time = time.time()
+                if not self.state.is_logged_in:
+                    # Show first reminder after 1 min, then every 5 mins
+                    if current_time - last_reminder_time >= 300:
+                        self.logger.info("User not logged in - showing login reminder")
+                        if self.notification_manager:
+                            self.notification_manager.show_info(
+                                "📢 WorkTre Login Reminder",
+                                "Please login to WorkTre to track your activities and breaks.",
+                                10 # Longer duration for visibility
+                            )
+                            last_reminder_time = current_time
+                else:
+                    # Reset timer when logged in so it shows 5 mins after logout
+                    last_reminder_time = current_time - 240 # Will show 1 min after next logout
+            except Exception as e:
+                self.logger.error(f"Error in login reminder loop: {e}")
+                time.sleep(60)
 
     def _on_inactivity_warning(self):
         """Handle inactivity warning."""
         self.logger.warning("Inactivity warning triggered")
+        
+        # Bring window to front with highest priority
+        if self.window:
+            try:
+                self.window.show()
+                self.window.restore()
+                
+                # Force to top on Windows
+                if sys.platform == "win32" and self.window.window:
+                    force_window_to_top(self.window.window.native_id)
+                
+                # Some platforms might need this to really grab focus
+                self.window.evaluate_js("window.focus();")
+            except Exception as e:
+                self.logger.error(f"Failed to bring window to front: {e}")
+        
+        # Show notification
+        if self.notification_manager:
+            self.notification_manager.show_warning(
+                "⏰ Inactivity Detected",
+                "Are you still there? Activity monitoring paused.",
+                5
+            )
+            
         self.state.message_queue.add_message("inactivity_warning", {})
 
     def _on_inactivity_logout(self):
         """Handle inactivity logout."""
         self.logger.warning("Inactivity logout triggered")
+        
+        # Bring window to front
+        if self.window:
+            try:
+                self.window.show()
+                self.window.restore()
+            except Exception:
+                pass
+                
         self.state.message_queue.add_message("inactivity_logout", {})
 
     def _on_network_online(self):
@@ -594,24 +675,41 @@ class WorkTreApp:
         except (ValueError, TypeError):
             return default
 
-    def _on_login_success(self):
+    def _on_login_success(self, service_info: Optional[Dict[str, Any]] = None):
         """Handle successful login."""
         if not self.inactivity_manager:
             self._init_managers_bg()
             time.sleep(0.5)
 
+        # Merge user_info and service_info for settings lookup
+        settings_data = {}
         if self.state.user_info:
-            warn_time = self._get_safe_int(self.state.user_info.get("InactivityBreakTime"), 15) * 60
-            logout_time = self._get_safe_int(self.state.user_info.get("InactivityBreakLogoutTime"), 60) * 60
-            self.logger.info(f"Inactivity settings - warn_time: {warn_time}s, logout_time: {logout_time}s")
+            settings_data.update(self.state.user_info)
+            # Log available keys for debugging
+            self.logger.info(f"Available user_info keys: {list(self.state.user_info.keys())}")
+            
+        if service_info:
+            settings_data.update(service_info)
+            self.logger.info(f"Available service_info keys: {list(service_info.keys())}")
+
+        if settings_data:
+            # Try multiple possible key names for inactivity settings
+            warn_val = settings_data.get("InactivityBreakTime") or settings_data.get("inactivity_warn")
+            logout_val = settings_data.get("InactivityBreakLogoutTime") or settings_data.get("inactivity_logout")
+            
+            warn_time = self._get_safe_int(warn_val, 15) * 60
+            logout_time = self._get_safe_int(logout_val, 60) * 60
+            
+            self.logger.info(f"Inactivity settings - warn_time: {warn_time}s ({warn_time//60}m), logout_time: {logout_time}s ({logout_time//60}m)")
 
             self.inactivity_manager.set_timeouts(warn_time, logout_time)
             self.inactivity_manager.user_logged_in(True)
             self.inactivity_manager.start_monitoring()
 
-        if self.state.user_info:
-            disconnect_time = self._get_safe_int(self.state.user_info.get("DisconnectLogoutTime"), 15) * 60
-            self.connectivity_manager.set_max_offline_time(disconnect_time)
+        # Connectivity settings
+        disconnect_val = settings_data.get("DisconnectLogoutTime") or settings_data.get("disconnect_timeout")
+        disconnect_time = self._get_safe_int(disconnect_val, 15) * 60
+        self.connectivity_manager.set_max_offline_time(disconnect_time)
 
         self.connectivity_manager.start_monitoring()
 
@@ -744,12 +842,22 @@ class WorkTreApp:
             self.tray_manager.stop()
 
         self.cleanup()
+        # Use os._exit(0) instead of sys.exit(0) to prevent pystray from catching 
+        # the SystemExit exception and showing a scary traceback in the console.
+        # This is safe because we have already called self.cleanup().
         os._exit(0)
 
     def cleanup(self):
         """Cleanup application resources."""
         self.logger.info("Cleaning up resources...")
         cleanup_temp_files(APP_NAME)
+
+        if hasattr(self, 'lock_handle') and self.lock_handle:
+            try:
+                portalocker.unlock(self.lock_handle)
+                self.lock_handle.close()
+            except Exception:
+                pass
 
         if hasattr(self, 'lock_file') and os.path.exists(self.lock_file):
             try:
@@ -830,7 +938,7 @@ class JSApi:
 
     # ==================== NEW METHODS NEEDED BY UI ====================
 
-    def start_app_intervals(self, user_data):
+    def start_app_intervals(self, user_data, service_data=None):
         """Start application intervals after successful login"""
         try:
             print(f"🔄 Starting app intervals for user: {user_data.get('EID')}")
@@ -841,7 +949,7 @@ class JSApi:
             self._app.state.current_user = user_data.get("EID")
 
             # Start all the intervals and monitoring
-            self._app._on_login_success()
+            self._app._on_login_success(service_data)
 
             # Lock window size after intervals start
             self._app.lock_window_size()
@@ -988,6 +1096,14 @@ class JSApi:
             self._app.check_window_size()
             if hasattr(self._app, 'api_client') and self._app.api_client:
                 result = self._app.api_client.inactivity(eid, reason)
+                
+                # Show notification for inactivity detection
+                if result.get("status") and self._app.notification_manager:
+                    self._app.notification_manager.show_warning(
+                        "⏰ Inactivity Detected",
+                        "Activity monitoring paused.",
+                        3
+                    )
                 return result
             return {"status": True}
         except Exception as e:
@@ -1000,6 +1116,14 @@ class JSApi:
             print(f"🔄 Logout due to inactivity for user: {eid}")
             if hasattr(self._app, 'api_client') and self._app.api_client:
                 result = self._app.api_client.logout_inactivity(eid)
+                
+                # Show notification
+                if self._app.notification_manager:
+                    self._app.notification_manager.show_warning(
+                        "⏰ Inactivity Logout",
+                        "You were logged out due to inactivity.",
+                        5
+                    )
                 return result
             return {"status": True}
         except Exception as e:
@@ -1175,6 +1299,20 @@ class JSApi:
             self._app.logger.error(f"Notification error: {e}")
             return {"status": False}
 
+    def show_logout_notification(self, username: str) -> Dict[str, Any]:
+        """Show logout notification."""
+        try:
+            if self._app.notification_manager:
+                self._app.notification_manager.show_success(
+                    "✅ Logout Successful",
+                    f"{username}, Goodbye!",
+                    3
+                )
+            return {"status": True}
+        except Exception as e:
+            self._app.logger.error(f"Logout notification error: {e}")
+            return {"status": False}
+
     # ==================== BREAK MANAGEMENT ====================
 
     def breakin(self, eid: str, break_type: str, comments: str = "", **kwargs) -> Dict[str, Any]:
@@ -1190,10 +1328,21 @@ class JSApi:
                 **kwargs
             )
 
-            if result.get("status"):
+            # Check status robustly (True or "True")
+            status = result.get("status")
+            if status is True or str(status).lower() == "true":
                 self._app.state.break_type = break_type
                 if self._app.inactivity_manager:
                     self._app.inactivity_manager.stop_monitoring()
+                
+                # Show notification
+                if self._app.notification_manager:
+                    formatted_type = break_type.replace("_", " ").title()
+                    self._app.notification_manager.show_break_notification(
+                        "☕ Break Started",
+                        f"You are now on {formatted_type} break.",
+                        3
+                    )
 
             return result
         except Exception as e:
@@ -1214,14 +1363,32 @@ class JSApi:
                 comments
             )
 
-            if result.get("status"):
+            # Check status robustly (True or "True")
+            status = result.get("status")
+            if status is True or str(status).lower() == "true":
                 self._app.state.break_type = ""
-                if self._app.inactivity_manager:
-                    self._app.inactivity_manager.reset_timer()
-                    self._app.inactivity_manager.start_monitoring()
+            
+            # ALWAYS resume monitoring when breakout is called
+            if self._app.inactivity_manager:
+                self._app.inactivity_manager.reset_timer()
+                self._app.inactivity_manager.start_monitoring()
 
-                # Log success
-                print(f"✅ Breakout successful for user {eid}")
+            # ALWAYS show notification when breakout is called, 
+            # as the UI has already transitioned the user back to work.
+            if self._app.notification_manager:
+                msg = "Welcome back! Activity monitoring resumed."
+                if inactivity or break_type == "inactivity":
+                    msg = "Inactivity break ended. Welcome back!"
+                
+                self._app.logger.info(f"Showing breakout notification: {msg}")
+                self._app.notification_manager.show_success(
+                    "✅ Break Ended",
+                    msg,
+                    5
+                )
+
+            # Log success
+            print(f"✅ Breakout successful for user {eid}")
 
             return result
         except Exception as e:
@@ -1354,6 +1521,16 @@ class JSApi:
 
     # ==================== APPLICATION METHODS ====================
 
+    def set_topmost(self, topmost: bool = True) -> Dict[str, Any]:
+        """Set or unset the window as topmost."""
+        try:
+            if sys.platform == "win32" and self._app.window and self._app.window.window:
+                force_window_to_top(self._app.window.window.native_id, topmost)
+            return {"status": True}
+        except Exception as e:
+            self._app.logger.error(f"Set topmost error: {e}")
+            return {"status": False}
+
     def close_app(self) -> Dict[str, Any]:
         """Close the application."""
         try:
@@ -1394,6 +1571,9 @@ def main():
 
     if app.initialize():
         app.run()
+        # After app.run() returns (window closed and allowed to destroy), 
+        # perform final cleanup.
+        app.cleanup()
     else:
         print("❌ Failed to initialize application")
         sys.exit(1)

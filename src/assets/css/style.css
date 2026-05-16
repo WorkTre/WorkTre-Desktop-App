@@ -212,7 +212,7 @@ html, body {
 
 .form-bottom-img {
     position: relative;
-    bottom: -50px;
+    bottom: -25px;
     left: -24px;
 }
 /* dashboard styling below */
@@ -281,7 +281,7 @@ html, body {
  #dashboard .content {
      /*padding: 50px 10px;*/
      padding: 40px 10px 18px 10px;
-     max-width: 60%;
+     max-width: 72%;
 }
 
  #dashboard .content .user-info .name-heading{
@@ -659,6 +659,9 @@ body {
     /*font-size: 12px;*/
     font: menu;
     margin-bottom: 19px;
+    color: #dc3545;
+    position: relative;
+    z-index: 100;
 }
  .break-wrapper button {
      width: 40%;
