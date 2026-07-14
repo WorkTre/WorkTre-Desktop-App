@@ -449,12 +449,78 @@
     <main id="settings_content" style="display: none;">
         <div class="row">
             <div class="col-12">
-                <div class="wrapper">
-                    <h1 class="heading">Coming Soon!</h1>
+                <div class="wrapper settings-panel">
+                    <h1 class="heading settings-heading">Settings</h1>
+                    <p class="settings-sub">What WorkTre App tracks on this device — and your privacy controls.</p>
+
+                    <div class="settings-card">
+                        <h3>WorkTre App health</h3>
+                        <ul class="tracking-list" id="app_health_list">
+                            <li id="health_version">Version: …</li>
+                            <li id="health_online">Connection: …</li>
+                            <li id="health_heartbeat">Last heartbeat: …</li>
+                            <li id="health_idle">Idle: …</li>
+                        </ul>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Privacy notice</h3>
+                        <p class="settings-hint" id="privacy_notice_text">
+                            WorkTre App records attendance (login/logout), shift time, breaks, and periodic activity heartbeats
+                            so managers can see whether you are online. Idle time is recorded when you step away.
+                            Screenshots are only taken if your company enables them; you can blur them before upload.
+                            App and URL tracking is not enabled. Heartbeats may queue offline and sync when you reconnect.
+                        </p>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>What’s tracked</h3>
+                        <ul class="tracking-list" id="tracking_list">
+                            <li>Attendance login / logout</li>
+                            <li>Shift timer &amp; breaks</li>
+                            <li>Idle / inactivity detection</li>
+                            <li>Activity heartbeat (about every 5 minutes)</li>
+                            <li id="track_screenshots">Screenshots: checking…</li>
+                            <li>App / URL tracking: not enabled</li>
+                        </ul>
+                        <p class="settings-note" id="ssl_note">Secure connection: checking…</p>
+                        <p class="settings-note" id="queue_note"></p>
+                        <p class="settings-hint" id="trust_hint">Managers can see your WorkTre App online status from the last activity heartbeat on the WorkTre dashboard.</p>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Screenshot privacy</h3>
+                        <p class="settings-hint">Blur sensitive content before upload when screenshots are enabled by your company.</p>
+                        <label class="settings-label" for="blur_level">Blur level</label>
+                        <select id="blur_level" class="form-select settings-select">
+                            <option value="0">Off (no blur)</option>
+                            <option value="4">Light</option>
+                            <option value="8" selected>Medium (recommended)</option>
+                            <option value="16">Strong</option>
+                        </select>
+                        <button type="button" id="btn_save_privacy" class="btn btn-primary settings-save-btn">Save privacy settings</button>
+                        <p class="settings-save-msg" id="privacy_save_msg"></p>
+                    </div>
                 </div>
             </div>
         </div>
     </main>
+
+    <!-- Trust / monitoring notice (first login) -->
+    <div id="trustNoticeModal" class="trust-notice-overlay" style="display:none;" aria-hidden="true">
+        <div class="trust-notice-dialog" role="dialog" aria-labelledby="trustNoticeTitle">
+            <h2 id="trustNoticeTitle">Welcome to WorkTre App</h2>
+            <p id="trustNoticeBody">
+                WorkTre App keeps your attendance accurate. It sends periodic activity heartbeats and detects idle time.
+                Screenshots are only used if your company turns them on — you can blur them in Settings.
+            </p>
+            <p id="trustNoticeScreenshot" class="trust-notice-extra" style="display:none;">
+                Your company has screenshots enabled. By continuing, you acknowledge that screen captures may be uploaded
+                (with your chosen blur level) while you are clocked in.
+            </p>
+            <button type="button" id="btn_ack_trust" class="btn btn-primary">I understand — continue</button>
+        </div>
+    </div>
 
     <main id="profile_content" style="display: none;">
         <div class="row">

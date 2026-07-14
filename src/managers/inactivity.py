@@ -6,10 +6,13 @@ Inactivity manager for tracking user activity.
 import threading
 import time
 import sys
-from typing import Optional, Callable
-from datetime import datetime
+from typing import Optional, Callable, List, Tuple
+from datetime import datetime, timedelta
 
 from ..config import constants
+
+# Idle must last this long before we record a window for the server
+IDLE_RECORD_THRESHOLD = 60
 
 
 class InactivityManager:
@@ -34,6 +37,11 @@ class InactivityManager:
         self._warning_triggered = False
         self._warning_time = 0.0
         self._user_logged_in = False
+
+        # Completed idle windows for lastactivitydate (server needs start + end)
+        self._idle_began_at: Optional[datetime] = None
+        self._pending_idle_windows: List[Tuple[datetime, datetime]] = []
+        self._idle_lock = threading.Lock()
 
     def _get_default_logger(self):
         import logging
@@ -142,6 +150,7 @@ class InactivityManager:
                     continue
 
                 idle_time = self._get_idle_time()
+                self._track_idle_window(idle_time)
 
                 # Check for warning timeout
                 if not self._warning_triggered:
@@ -221,9 +230,39 @@ class InactivityManager:
         """Get current idle time."""
         return self._get_idle_time()
 
+    def _track_idle_window(self, idle_time: float) -> None:
+        """Record completed idle periods (server requires start + end)."""
+        threshold = min(IDLE_RECORD_THRESHOLD, max(30, self._warning_timeout // 2))
+        with self._idle_lock:
+            if idle_time >= threshold:
+                if self._idle_began_at is None:
+                    self._idle_began_at = datetime.now() - timedelta(seconds=idle_time)
+            elif self._idle_began_at is not None and idle_time < 2.0:
+                end = datetime.now()
+                self._pending_idle_windows.append((self._idle_began_at, end))
+                self.logger.info(
+                    f"Idle window completed: {self._idle_began_at.strftime('%H:%M:%S')}–{end.strftime('%H:%M:%S')}"
+                )
+                self._idle_began_at = None
+
+    def consume_idle_for_heartbeat(self) -> Tuple[str, str]:
+        """
+        Pop one completed idle window for lastactivitydate.
+        Returns (idle_time_start, idle_time_end) or ("", "").
+        """
+        with self._idle_lock:
+            if not self._pending_idle_windows:
+                return "", ""
+            start, end = self._pending_idle_windows.pop(0)
+        fmt = "%Y-%m-%d %H:%M:%S"
+        return start.strftime(fmt), end.strftime(fmt)
+
     def get_status(self) -> dict:
         """Get current inactivity status."""
         idle_time = self.get_idle_time()
+        with self._idle_lock:
+            pending = len(self._pending_idle_windows)
+            in_idle = self._idle_began_at is not None
         return {
             'idle_time': idle_time,
             'warning_timeout': self._warning_timeout,
@@ -232,5 +271,7 @@ class InactivityManager:
             'user_logged_in': self._user_logged_in,
             'time_to_warning': max(0, self._warning_timeout - idle_time),
             'time_to_logout': max(0, self._logout_timeout - idle_time),
-            'last_activity': datetime.fromtimestamp(self._last_activity).isoformat()
+            'last_activity': datetime.fromtimestamp(self._last_activity).isoformat(),
+            'pending_idle_windows': pending,
+            'currently_idle': in_idle or idle_time >= IDLE_RECORD_THRESHOLD,
         }

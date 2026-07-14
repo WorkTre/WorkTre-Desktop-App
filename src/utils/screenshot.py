@@ -12,14 +12,16 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 try:
-    from PIL import ImageGrab, Image
+    from PIL import ImageGrab, Image, ImageFilter
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
     print("⚠️ PIL/Pillow not installed. Screenshot functionality disabled.")
 
 import requests
-from ..config import constants
+import certifi
+from ..config import constants, settings
+from .preferences import get_blur_radius
 
 
 class ScreenshotManager:
@@ -40,6 +42,18 @@ class ScreenshotManager:
         else:
             print(f"[Screenshot] {message}")
 
+    def _apply_privacy_blur(self, image):
+        """Apply Gaussian blur based on local privacy preferences."""
+        try:
+            radius = get_blur_radius()
+        except Exception:
+            radius = settings.SCREENSHOT_BLUR_RADIUS if settings.SCREENSHOT_BLUR_ENABLED else 0
+
+        if radius and radius > 0:
+            self._log(f"Applying privacy blur (radius={radius})")
+            return image.filter(ImageFilter.GaussianBlur(radius=radius))
+        return image
+
     def capture(self, quality: int = 85, format: str = "PNG") -> Optional[bytes]:
         """
         Capture a screenshot.
@@ -56,19 +70,16 @@ class ScreenshotManager:
             return None
 
         try:
-            # Capture screenshot
             screenshot = ImageGrab.grab(all_screens=True)
+            screenshot = self._apply_privacy_blur(screenshot)
 
-            # Convert to bytes
             buffer = BytesIO()
 
             if format.upper() == "JPEG":
-                # Convert to RGB for JPEG
                 if screenshot.mode != 'RGB':
                     screenshot = screenshot.convert('RGB')
                 screenshot.save(buffer, format="JPEG", quality=quality)
             else:
-                # PNG format
                 screenshot.save(buffer, format="PNG")
 
             buffer.seek(0)
@@ -79,16 +90,7 @@ class ScreenshotManager:
             return None
 
     def capture_to_base64(self, quality: int = 85, format: str = "PNG") -> Optional[str]:
-        """
-        Capture screenshot and convert to base64.
-
-        Args:
-            quality: JPEG quality
-            format: Image format
-
-        Returns:
-            Base64 encoded string, or None if failed
-        """
+        """Capture screenshot and convert to base64."""
         image_data = self.capture(quality, format)
         if image_data:
             return base64.b64encode(image_data).decode('utf-8')
@@ -96,30 +98,17 @@ class ScreenshotManager:
 
     def upload(self, user_id: str, image_data: Optional[bytes] = None,
                base64_data: Optional[str] = None) -> bool:
-        """
-        Upload screenshot to server.
-
-        Args:
-            user_id: User ID
-            image_data: Raw image bytes
-            base64_data: Base64 encoded image data
-
-        Returns:
-            True if upload successful
-        """
-        # Get image data from either source
+        """Upload screenshot to server."""
         if base64_data:
             b64_string = base64_data
         elif image_data:
             b64_string = base64.b64encode(image_data).decode('utf-8')
         else:
-            # Capture new screenshot
             b64_string = self.capture_to_base64()
             if not b64_string:
                 return False
 
         try:
-            # Prepare upload data
             url = f"{self._upload_url}?userid={user_id}"
             payload = {
                 "userid": user_id,
@@ -128,8 +117,12 @@ class ScreenshotManager:
                 "format": "PNG"
             }
 
-            # Upload to server
-            response = requests.post(url, data=payload, timeout=10)
+            response = requests.post(
+                url,
+                data=payload,
+                timeout=10,
+                verify=(certifi.where() if settings.VERIFY_SSL else False)
+            )
 
             if response.status_code == 200:
                 self._log(f"Screenshot uploaded successfully for user {user_id}")
@@ -146,13 +139,7 @@ class ScreenshotManager:
             return False
 
     def upload_async(self, user_id: str, callback: Optional[callable] = None):
-        """
-        Upload screenshot asynchronously.
-
-        Args:
-            user_id: User ID
-            callback: Optional callback function on completion
-        """
+        """Upload screenshot asynchronously."""
         def _upload_thread():
             result = self.upload(user_id)
             if callback:
@@ -169,7 +156,6 @@ class ScreenshotManager:
             'timestamp': time.time()
         })
 
-        # Start processing thread if not running
         if not self._running:
             self._start_queue_processor()
 
@@ -181,7 +167,7 @@ class ScreenshotManager:
             while self._running and self._upload_queue:
                 item = self._upload_queue.pop(0)
                 self.upload(item['user_id'])
-                time.sleep(1)  # Rate limiting
+                time.sleep(1)
             self._running = False
 
         self._upload_thread = threading.Thread(target=processor, daemon=True)
@@ -196,7 +182,6 @@ class ScreenshotManager:
 
 # ==================== CONVENIENCE FUNCTIONS ====================
 
-# Global screenshot manager instance
 _screenshot_manager = None
 
 
@@ -209,19 +194,7 @@ def get_screenshot_manager(logger=None) -> ScreenshotManager:
 
 
 def take_screenshot(user_id: str, logger=None, async_mode: bool = True) -> bool:
-    """
-    Take and upload a screenshot.
-
-    This is the main function called from main.py.
-
-    Args:
-        user_id: User ID to associate with screenshot
-        logger: Optional logger instance
-        async_mode: Whether to upload asynchronously
-
-    Returns:
-        True if upload started/successful
-    """
+    """Take and upload a screenshot."""
     manager = get_screenshot_manager(logger)
 
     if async_mode:
@@ -237,28 +210,16 @@ def take_screenshot_sync(user_id: str, logger=None) -> bool:
 
 
 def capture_screenshot_base64(quality: int = 85, format: str = "PNG") -> Optional[str]:
-    """
-    Capture screenshot and return as base64.
-
-    Returns:
-        Base64 encoded screenshot or None
-    """
+    """Capture screenshot and return as base64."""
     manager = get_screenshot_manager()
     return manager.capture_to_base64(quality, format)
 
 
 def capture_screenshot_bytes(quality: int = 85, format: str = "PNG") -> Optional[bytes]:
-    """
-    Capture screenshot and return as bytes.
-
-    Returns:
-        Screenshot bytes or None
-    """
+    """Capture screenshot and return as bytes."""
     manager = get_screenshot_manager()
     return manager.capture(quality, format)
 
-
-# ==================== EXPORTS ====================
 
 __all__ = [
     'ScreenshotManager',

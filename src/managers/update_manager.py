@@ -434,7 +434,30 @@ class UpdateManager:
             # Download file with progress
             self.logger.info(f"🌐 Starting download...")
 
-            response = requests.get(download_url, stream=True, timeout=self.timeout)
+            verify_ssl = True
+            try:
+                from ..config import settings as app_settings
+                verify_ssl = bool(getattr(app_settings, "VERIFY_SSL", True))
+            except Exception:
+                pass
+
+            verify_arg = True
+            if verify_ssl:
+                try:
+                    import certifi
+                    verify_arg = certifi.where()
+                except Exception:
+                    verify_arg = True
+            else:
+                verify_arg = False
+
+            response = requests.get(
+                download_url,
+                stream=True,
+                timeout=self.timeout,
+                verify=verify_arg,
+                headers={'User-Agent': 'WorkTre-App/UpdateManager'},
+            )
             response.raise_for_status()
 
             total_size = int(response.headers.get('content-length', 0))
@@ -505,13 +528,24 @@ class UpdateManager:
         try:
             self.logger.info("Using urllib fallback for download")
 
-            # Create SSL context that doesn't verify (for corporate networks)
-            ssl_context = ssl.create_default_context()
-            ssl_context.check_hostname = False
-            ssl_context.verify_mode = ssl.CERT_NONE
+            verify_ssl = True
+            try:
+                from ..config import settings as app_settings
+                verify_ssl = bool(getattr(app_settings, "VERIFY_SSL", True))
+            except Exception:
+                pass
+
+            if verify_ssl:
+                try:
+                    import certifi
+                    ssl_context = ssl.create_default_context(cafile=certifi.where())
+                except Exception:
+                    ssl_context = ssl.create_default_context()
+            else:
+                ssl_context = ssl._create_unverified_context()
 
             # Open URL
-            req = Request(download_url, headers={'User-Agent': 'WorkTre-Desktop/UpdateManager'})
+            req = Request(download_url, headers={'User-Agent': 'WorkTre-App/UpdateManager'})
 
             with urlopen(req, timeout=self.timeout, context=ssl_context) as response:
                 # Get file size if available
@@ -599,6 +633,12 @@ class UpdateManager:
             self.logger.warning("No checksum provided, skipping verification")
             return True
 
+        # Placeholder from version.json until release builds publish real hashes
+        placeholder = expected_checksum.strip().lower()
+        if placeholder in ("", "sha256_hash_here", "todo", "pending"):
+            self.logger.warning("Checksum placeholder in version.json — skipping verification for this release")
+            return True
+
         try:
             sha256 = hashlib.sha256()
             with open(filepath, 'rb') as f:
@@ -646,16 +686,46 @@ class UpdateManager:
 
             # Use requests if available
             if REQUESTS_AVAILABLE:
+                verify_ssl = True
+                try:
+                    from ..config import settings as app_settings
+                    verify_ssl = bool(getattr(app_settings, "VERIFY_SSL", True))
+                except Exception:
+                    pass
+                verify_arg = True
+                if verify_ssl:
+                    try:
+                        import certifi
+                        verify_arg = certifi.where()
+                    except Exception:
+                        verify_arg = True
+                else:
+                    verify_arg = False
                 response = requests.get(
                     constants.UPDATE_URL,
                     timeout=5,
-                    headers={'User-Agent': 'WorkTre-Desktop'}
+                    headers={'User-Agent': 'WorkTre-App'},
+                    verify=verify_arg,
                 )
                 data = response.json() if response.status_code == 200 else None
             else:
                 # Fallback to urllib
-                req = Request(constants.UPDATE_URL, headers={'User-Agent': 'WorkTre-Desktop'})
-                with urlopen(req, timeout=5) as response:
+                verify_ssl = True
+                try:
+                    from ..config import settings as app_settings
+                    verify_ssl = bool(getattr(app_settings, "VERIFY_SSL", True))
+                except Exception:
+                    pass
+                if verify_ssl:
+                    try:
+                        import certifi
+                        ssl_context = ssl.create_default_context(cafile=certifi.where())
+                    except Exception:
+                        ssl_context = ssl.create_default_context()
+                else:
+                    ssl_context = ssl._create_unverified_context()
+                req = Request(constants.UPDATE_URL, headers={'User-Agent': 'WorkTre-App'})
+                with urlopen(req, timeout=5, context=ssl_context) as response:
                     data = json.loads(response.read().decode('utf-8'))
 
             if data:

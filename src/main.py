@@ -618,6 +618,7 @@ class WorkTreApp:
         self.logger.info("Network connection restored")
         self.state.message_queue.add_message("network_online", {})
         if self.state.is_logged_in:
+            self._flush_activity_queue()
             self._start_service_interval()
 
     def _on_network_offline(self):
@@ -774,6 +775,15 @@ class WorkTreApp:
                 self.state.interval_timer = None
             self.state.interval_running = False
 
+    def _idle_args_for_heartbeat(self):
+        """Completed idle window for SOAP (empty if none)."""
+        if self.inactivity_manager:
+            try:
+                return self.inactivity_manager.consume_idle_for_heartbeat()
+            except Exception as e:
+                self.logger.error(f"Idle window for heartbeat failed: {e}")
+        return "", ""
+
     def _on_interval_complete(self):
         """Handle service interval completion."""
         with self.state.interval_lock:
@@ -787,12 +797,22 @@ class WorkTreApp:
                                    '_last_activity_time') or current_time - self.state._last_activity_time > 60:
                         self.state._last_activity_time = current_time
 
-                        self.api_client.last_activity_date(
+                        idle_start, idle_end = self._idle_args_for_heartbeat()
+                        result = self.api_client.last_activity_date(
                             self.state.current_user,
                             "False",
-                            "",
-                            ""
+                            idle_start,
+                            idle_end
                         )
+
+                        if not result or (not result.get("status") and not result.get("skipped")):
+                            try:
+                                from .utils.activity_queue import get_activity_queue
+                                get_activity_queue(APP_NAME, self.logger).enqueue(
+                                    self.state.current_user, "False", idle_start, idle_end
+                                )
+                            except Exception as qe:
+                                self.logger.error(f"Failed to queue activity: {qe}")
 
                         self.logger.debug(f"Last activity called at {current_time}")
 
@@ -805,6 +825,23 @@ class WorkTreApp:
                     self._on_interval_complete
                 )
                 self.state.interval_timer.start()
+
+    def _flush_activity_queue(self):
+        """Send any queued heartbeats after reconnect."""
+        if not self.api_client or not self.state.is_logged_in:
+            return
+        try:
+            from .utils.activity_queue import get_activity_queue
+            queue = get_activity_queue(APP_NAME, self.logger)
+
+            def _send(user_id, break_flag, idle_start, idle_end):
+                return self.api_client.last_activity_date(
+                    user_id, break_flag, idle_start, idle_end
+                )
+
+            queue.flush(_send)
+        except Exception as e:
+            self.logger.error(f"Activity queue flush failed: {e}")
 
     def _take_screenshot(self):
         """Take and upload screenshot."""
@@ -1067,11 +1104,12 @@ class JSApi:
                 self._app._start_service_interval()
                 if self._app.inactivity_manager:
                     self._app.inactivity_manager.reset_timer()
+                idle_start, idle_end = self._app._idle_args_for_heartbeat()
                 self._app.api_client.last_activity_date(
                     self._app.state.current_user,
                     "False" if not break_marked else "True",
-                    "",
-                    ""
+                    idle_start,
+                    idle_end
                 )
             return {"status": True}
         except Exception as e:
@@ -1440,12 +1478,18 @@ class JSApi:
                 self._app._start_service_interval()
                 if self._app.inactivity_manager:
                     self._app.inactivity_manager.reset_timer()
-                self._app.api_client.last_activity_date(
+                idle_start, idle_end = self._app._idle_args_for_heartbeat()
+                result = self._app.api_client.last_activity_date(
                     self._app.state.current_user,
                     break_flag,
-                    "",
-                    ""
+                    idle_start,
+                    idle_end
                 )
+                if not result or (not result.get("status") and not result.get("skipped")):
+                    from .utils.activity_queue import get_activity_queue
+                    get_activity_queue(APP_NAME, self._app.logger).enqueue(
+                        self._app.state.current_user, break_flag, idle_start, idle_end
+                    )
             return {"status": True}
         except Exception as e:
             self._app.logger.error(f"Last activity error: {e}")
@@ -1499,6 +1543,90 @@ class JSApi:
         except Exception as e:
             self._app.logger.error(f"System status error: {e}")
             return {"error": str(e)}
+
+    def get_privacy_settings(self) -> Dict[str, Any]:
+        """Return local privacy settings + what WorkTre App tracks."""
+        try:
+            from .utils.preferences import get_preferences
+            from .utils.activity_queue import get_activity_queue
+            from .config import settings as app_settings
+
+            prefs = get_preferences(APP_NAME)
+            user_info = self._app.state.user_info or {}
+            screenshots_enabled = str(user_info.get("ScreenShotStatus", "0")) == "1"
+            idle_status = {}
+            if self._app.inactivity_manager:
+                idle_status = self._app.inactivity_manager.get_status()
+
+            last_hb = getattr(self._app.state, '_last_activity_time', None)
+            last_hb_age = None
+            if last_hb:
+                last_hb_age = max(0, int(time.time() - last_hb))
+
+            online = True
+            if self._app.connectivity_manager:
+                online = bool(self._app.connectivity_manager.is_online())
+
+            return {
+                "status": True,
+                "preferences": prefs,
+                "tracking": {
+                    "attendance_login_logout": True,
+                    "shift_timer": True,
+                    "breaks": True,
+                    "idle_detection": True,
+                    "activity_heartbeat": True,
+                    "screenshots": screenshots_enabled,
+                    "app_url_tracking": False,
+                    "ssl_verify": bool(app_settings.VERIFY_SSL),
+                },
+                "queued_heartbeats": get_activity_queue(APP_NAME, self._app.logger).size(),
+                "health": {
+                    "app_name": "WorkTre App",
+                    "version": self._app.app_version,
+                    "online": online,
+                    "logged_in": bool(self._app.state.is_logged_in),
+                    "last_heartbeat_age_seconds": last_hb_age,
+                    "idle_seconds": int(idle_status.get("idle_time", 0) or 0),
+                    "currently_idle": bool(idle_status.get("currently_idle", False)),
+                },
+                "consent": {
+                    "monitoring_notice_acked": bool(prefs.get("monitoring_notice_acked", False)),
+                    "screenshot_consent_acked": bool(prefs.get("screenshot_consent_acked", False)),
+                    "needs_monitoring_notice": not bool(prefs.get("monitoring_notice_acked", False)),
+                    "needs_screenshot_consent": screenshots_enabled and not bool(
+                        prefs.get("screenshot_consent_acked", False)
+                    ),
+                },
+            }
+        except Exception as e:
+            self._app.logger.error(f"Get privacy settings error: {e}")
+            return {"status": False, "msg": str(e)}
+
+    def save_privacy_settings(self, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Save local privacy preferences (blur, consent, etc.)."""
+        try:
+            from .utils.preferences import save_preferences, get_preferences
+            if preferences is None:
+                preferences = {}
+            ok = save_preferences(preferences, APP_NAME)
+            return {"status": ok, "preferences": get_preferences(APP_NAME)}
+        except Exception as e:
+            self._app.logger.error(f"Save privacy settings error: {e}")
+            return {"status": False, "msg": str(e)}
+
+    def acknowledge_trust_notice(self, screenshot_consent: bool = False) -> Dict[str, Any]:
+        """Record monitoring / screenshot consent from the trust notice."""
+        try:
+            from .utils.preferences import save_preferences, get_preferences
+            payload = {"monitoring_notice_acked": True}
+            if screenshot_consent:
+                payload["screenshot_consent_acked"] = True
+            ok = save_preferences(payload, APP_NAME)
+            return {"status": ok, "preferences": get_preferences(APP_NAME)}
+        except Exception as e:
+            self._app.logger.error(f"Acknowledge trust notice error: {e}")
+            return {"status": False, "msg": str(e)}
 
     def request_access(self) -> Dict[str, Any]:
         """Request access."""

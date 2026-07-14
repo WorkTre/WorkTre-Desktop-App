@@ -1,7 +1,7 @@
 {
   "version": "2.2.3",
   "required": false,
-  "release_notes": "• Fixed cross-platform update issues\n• Improved performance\n• Bug fixes",
+  "release_notes": "• Desktop trust: idle sync, privacy notice, verified updates\n• WorkTre App naming\n• Bug fixes",
   "windows": {
     "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.3/WorkTreInstaller.exe",
     "checksum": "sha256_hash_here"
@@ -13,5 +13,6 @@
   "linux": {
     "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.3/WorkTreInstaller.AppImage",
     "checksum": "sha256_hash_here"
-  }
+  },
+  "_checksum_note": "Replace sha256_hash_here with real SHA256 of each installer before publishing a release. Placeholder checksums are skipped at install time."
 }

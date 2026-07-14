@@ -10,7 +10,7 @@ SS_UPLOAD_URL = "https://worktre.com/ss_upload/index"
 
 # Application info
 APP_NAME = "WorkTre"
-APP_DESCRIPTION = "WorkTre Desktop Application"
+APP_DESCRIPTION = "WorkTre App"
 APP_AUTHOR = "WorkTre Team"
 
 # Time constants (in seconds)

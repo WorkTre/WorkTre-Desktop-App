@@ -111,7 +111,7 @@ class SOAPClient:
                     data=payload,
                     headers=request_headers,
                     timeout=self.timeout,
-                    verify=False  # SSL verification disabled for simplicity
+                    verify=(certifi.where() if settings.VERIFY_SSL else False)
                 )
 
                 self.logger.debug(f"SOAP request to {action} - Status: {response.status_code}")

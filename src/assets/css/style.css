@@ -481,6 +481,127 @@ html, body {
     justify-content: center;
 }
 
+#settings_content .wrapper.settings-panel{
+    align-items: stretch;
+    justify-content: flex-start;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 1rem 1.25rem 1.5rem;
+    text-align: left;
+}
+
+#settings_content .settings-heading{
+    font-size: 1.5rem !important;
+    margin-bottom: 0.25rem;
+    text-align: left;
+}
+
+#settings_content .settings-sub{
+    color: #5a6a6a;
+    margin-bottom: 1rem;
+    font-size: 0.92rem;
+}
+
+#settings_content .settings-card{
+    background: #f7fbfb;
+    border: 1px solid #d7e6e6;
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    margin-bottom: 0.85rem;
+}
+
+#settings_content .settings-card h3{
+    font-size: 1rem;
+    margin: 0 0 0.5rem;
+    color: #0f3d3e;
+}
+
+#settings_content .tracking-list{
+    margin: 0;
+    padding-left: 1.1rem;
+    color: #334;
+    font-size: 0.9rem;
+}
+
+#settings_content .tracking-list li{
+    margin-bottom: 0.35rem;
+}
+
+#settings_content .settings-note,
+#settings_content .settings-hint{
+    font-size: 0.82rem;
+    color: #5a6a6a;
+    margin: 0.5rem 0 0;
+}
+
+#settings_content .settings-label{
+    display: block;
+    font-size: 0.85rem;
+    margin: 0.5rem 0 0.25rem;
+}
+
+#settings_content .settings-select{
+    max-width: 280px;
+}
+
+#settings_content .settings-save-btn{
+    margin-top: 0.75rem;
+    background: #01a78d;
+    border-color: #01a78d;
+}
+
+#settings_content .settings-save-msg{
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    color: #017a68;
+    min-height: 1.2em;
+}
+
+.trust-notice-overlay{
+    position: fixed;
+    inset: 0;
+    z-index: 10050;
+    background: rgba(10, 30, 30, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.trust-notice-dialog{
+    background: #fff;
+    border-radius: 14px;
+    max-width: 420px;
+    width: 100%;
+    padding: 1.25rem 1.4rem 1.4rem;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+}
+
+.trust-notice-dialog h2{
+    font-size: 1.2rem;
+    margin: 0 0 0.6rem;
+    color: #0f3d3e;
+}
+
+.trust-notice-dialog p{
+    font-size: 0.9rem;
+    color: #445;
+    margin: 0 0 0.75rem;
+    line-height: 1.45;
+}
+
+.trust-notice-dialog .trust-notice-extra{
+    background: #f0fafa;
+    border: 1px solid #cfe8e6;
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+}
+
+.trust-notice-dialog .btn{
+    width: 100%;
+    margin-top: 0.35rem;
+}
+
 #dashboard .back-btn{
     padding: 3px 4px;
     background: #efefef;

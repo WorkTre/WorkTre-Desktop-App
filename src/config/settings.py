@@ -52,8 +52,12 @@ KEY_FILE_NAME = constants.KEY_FILE
 DATA_FILE_NAME = constants.DATA_FILE
 ENCRYPTION_ALGORITHM = "fernet"
 
-# SSL
-VERIFY_SSL = False  # Set to False for development, True for production
+# SSL — verify certificates for SOAP/API calls (production trust)
+VERIFY_SSL = True
+
+# Screenshot privacy defaults (overridable in user_preferences.json)
+SCREENSHOT_BLUR_ENABLED = True
+SCREENSHOT_BLUR_RADIUS = 8  # Gaussian blur radius; 0 = off
 
 # Platform-specific settings
 class PlatformSettings:

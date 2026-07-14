@@ -110,6 +110,8 @@ function setupEventListeners() {
     setupSafeListener('break_logs', 'click', showBreakLogs);
     setupSafeListener('notifications', 'click', showNotifications);
     setupSafeListener('settings', 'click', showSettings);
+    setupSafeListener('btn_save_privacy', 'click', savePrivacySettingsPanel);
+    setupSafeListener('btn_ack_trust', 'click', acknowledgeTrustNotice);
     setupSafeListener('profile', 'click', showProfile);
     setupSafeListener('logout', 'click', handleLogout);
     setupSafeListener('back_button', 'click', goBackToDashboard);
@@ -375,6 +377,9 @@ async function handleSuccessfulLogin(userData, email) {
 
     // Update dashboard with user data
     await updateDashboardWithUserData(userData, getServiceResponse);
+
+    // First-run / post-login trust notice (WorkTre App)
+    await maybeShowTrustNotice();
 }
 
 /**
@@ -1821,13 +1826,157 @@ function showNotifications() {
 /**
  * Show settings
  */
-function showSettings() {
+async function showSettings() {
     setElementDisplay("break_logs_content", "none");
     setElementDisplay("dashboard_content", "none");
     setElementDisplay("notifications_content", "none");
     setElementDisplay("settings_content", "block");
     setElementDisplay("profile_content", "none");
     setElementDisplay("back_button", "block");
+    await loadPrivacySettingsPanel();
+}
+
+async function loadPrivacySettingsPanel() {
+    const msg = document.getElementById("privacy_save_msg");
+    if (msg) msg.textContent = "";
+    try {
+        if (!window.pywebview?.api?.get_privacy_settings) {
+            return;
+        }
+        const res = await window.pywebview.api.get_privacy_settings();
+        if (!res || !res.status) {
+            return;
+        }
+        const prefs = res.preferences || {};
+        const tracking = res.tracking || {};
+        const health = res.health || {};
+        const blurSelect = document.getElementById("blur_level");
+        if (blurSelect) {
+            const radius = prefs.screenshot_blur_enabled === false ? 0 : (prefs.screenshot_blur_radius ?? 8);
+            blurSelect.value = String(radius);
+        }
+        const ss = document.getElementById("track_screenshots");
+        if (ss) {
+            ss.textContent = tracking.screenshots
+                ? "Screenshots: enabled by your company (blur applies before upload)"
+                : "Screenshots: not enabled for your account";
+        }
+        const ssl = document.getElementById("ssl_note");
+        if (ssl) {
+            ssl.textContent = tracking.ssl_verify
+                ? "Secure connection: SSL certificate verification is ON"
+                : "Secure connection: SSL verification is OFF (not recommended)";
+        }
+        const qn = document.getElementById("queue_note");
+        if (qn) {
+            const n = res.queued_heartbeats || 0;
+            qn.textContent = n > 0
+                ? `Offline queue: ${n} activity heartbeat(s) waiting to sync`
+                : "Offline queue: empty";
+        }
+        const hv = document.getElementById("health_version");
+        if (hv) {
+            hv.textContent = `Version: ${health.version || "—"}`;
+        }
+        const ho = document.getElementById("health_online");
+        if (ho) {
+            ho.textContent = health.online ? "Connection: online" : "Connection: offline";
+        }
+        const hh = document.getElementById("health_heartbeat");
+        if (hh) {
+            const age = health.last_heartbeat_age_seconds;
+            if (age == null) {
+                hh.textContent = "Last heartbeat: not yet this session";
+            } else if (age < 60) {
+                hh.textContent = "Last heartbeat: just now";
+            } else {
+                hh.textContent = `Last heartbeat: ${Math.floor(age / 60)} min ago`;
+            }
+        }
+        const hi = document.getElementById("health_idle");
+        if (hi) {
+            const secs = health.idle_seconds || 0;
+            hi.textContent = health.currently_idle
+                ? `Idle: away (~${Math.floor(secs / 60)} min)`
+                : `Idle: active (${secs}s since last input)`;
+        }
+        const hint = document.getElementById("trust_hint");
+        if (hint) {
+            hint.textContent = "Managers can see your WorkTre App online status from the last activity heartbeat on the WorkTre dashboard.";
+        }
+    } catch (e) {
+        console.error("loadPrivacySettingsPanel", e);
+    }
+}
+
+async function maybeShowTrustNotice() {
+    try {
+        if (!window.pywebview?.api?.get_privacy_settings) {
+            return;
+        }
+        const res = await window.pywebview.api.get_privacy_settings();
+        if (!res || !res.status) {
+            return;
+        }
+        const consent = res.consent || {};
+        if (!consent.needs_monitoring_notice && !consent.needs_screenshot_consent) {
+            return;
+        }
+        const modal = document.getElementById("trustNoticeModal");
+        const shot = document.getElementById("trustNoticeScreenshot");
+        if (shot) {
+            shot.style.display = consent.needs_screenshot_consent ? "block" : "none";
+        }
+        if (modal) {
+            modal.style.display = "flex";
+            modal.setAttribute("aria-hidden", "false");
+            modal.dataset.needsScreenshot = consent.needs_screenshot_consent ? "1" : "0";
+        }
+    } catch (e) {
+        console.error("maybeShowTrustNotice", e);
+    }
+}
+
+async function acknowledgeTrustNotice() {
+    try {
+        const modal = document.getElementById("trustNoticeModal");
+        const needShot = modal && modal.dataset.needsScreenshot === "1";
+        if (window.pywebview?.api?.acknowledge_trust_notice) {
+            await window.pywebview.api.acknowledge_trust_notice(!!needShot);
+        } else if (window.pywebview?.api?.save_privacy_settings) {
+            const payload = { monitoring_notice_acked: true };
+            if (needShot) payload.screenshot_consent_acked = true;
+            await window.pywebview.api.save_privacy_settings(payload);
+        }
+        if (modal) {
+            modal.style.display = "none";
+            modal.setAttribute("aria-hidden", "true");
+        }
+    } catch (e) {
+        console.error("acknowledgeTrustNotice", e);
+    }
+}
+
+async function savePrivacySettingsPanel() {
+    const msg = document.getElementById("privacy_save_msg");
+    const blurSelect = document.getElementById("blur_level");
+    const radius = parseInt(blurSelect?.value || "8", 10);
+    try {
+        if (!window.pywebview?.api?.save_privacy_settings) {
+            if (msg) msg.textContent = "Settings API not available.";
+            return;
+        }
+        const res = await window.pywebview.api.save_privacy_settings({
+            screenshot_blur_radius: radius,
+            screenshot_blur_enabled: radius > 0
+        });
+        if (msg) {
+            msg.textContent = res && res.status ? "Saved. New blur level applies to the next screenshot." : (res?.msg || "Save failed.");
+        }
+    } catch (e) {
+        console.error("savePrivacySettingsPanel", e);
+        if (msg) msg.textContent = "Could not save settings.";
+    }
 }
 
 /**

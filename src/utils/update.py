@@ -100,11 +100,24 @@ class UpdateManager:
             self.download_progress = 0
             self._cancel_requested = False
 
-            # Create SSL context
-            ssl_context = ssl._create_unverified_context()
+            # Create SSL context (verified by default)
+            verify_ssl = True
+            try:
+                from ..config import settings as app_settings
+                verify_ssl = bool(getattr(app_settings, "VERIFY_SSL", True))
+            except Exception:
+                pass
+            if verify_ssl:
+                try:
+                    import certifi
+                    ssl_context = ssl.create_default_context(cafile=certifi.where())
+                except Exception:
+                    ssl_context = ssl.create_default_context()
+            else:
+                ssl_context = ssl._create_unverified_context()
 
             # Open URL
-            req = Request(url, headers={'User-Agent': 'WorkTre-Desktop/1.0'})
+            req = Request(url, headers={'User-Agent': 'WorkTre-App/1.0'})
             response = urlopen(req, context=ssl_context, timeout=30)
 
             # Get file size
