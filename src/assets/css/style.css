@@ -218,13 +218,36 @@ html, body {
 /* dashboard styling below */
  #dashboard{
     position: relative;
-    /*background-color: red;
-    */
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+/* Keep column layout even when JS sets display:block */
+#dashboard[style*="display: block"],
+#dashboard[style*="display:block"],
+#dashboard[style*="display: flex"],
+#dashboard[style*="display:flex"] {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+}
+
+#dashboard > main {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
  #dashboard nav.navigations{
      background-color: #efefef;
      padding: 10px 35px;
      border-bottom: 7px solid #000;
+     flex-shrink: 0;
 }
 
 #dashboard .main-logo {
@@ -308,6 +331,11 @@ html, body {
 }
  #dashboard footer{
      background: #1ca38b;
+     flex: 0 0 auto;
+     width: 100%;
+     margin-top: auto;
+     position: relative;
+     z-index: 2;
 }
  #dashboard footer p{
      padding: 4px;
@@ -475,10 +503,12 @@ html, body {
 #notifications_content .wrapper,
 #settings_content .wrapper,
 #profile_content .wrapper{
-	height: 71.7vh;
+	min-height: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-sizing: border-box;
 }
 
 #settings_content .wrapper.settings-panel{
@@ -486,7 +516,7 @@ html, body {
     justify-content: flex-start;
     flex-direction: column;
     overflow-y: auto;
-    padding: 1rem 1.25rem 1.5rem;
+    padding: 0.85rem 1.25rem 1.5rem 3.5rem;
     text-align: left;
 }
 
@@ -494,6 +524,10 @@ html, body {
     font-size: 1.5rem !important;
     margin-bottom: 0.25rem;
     text-align: left;
+    line-height: 1.3;
+    min-height: 32px;
+    display: flex;
+    align-items: center;
 }
 
 #settings_content .settings-sub{
@@ -603,15 +637,31 @@ html, body {
 }
 
 #dashboard .back-btn{
-    padding: 3px 4px;
+    padding: 0;
     background: #efefef;
     border-radius: 50%;
     color: #fff;
     position: absolute;
-    top: 150px;
+    top: 124px;
     left: 16px;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     border: 1px solid #cacaca;
+    z-index: 6;
+    box-sizing: border-box;
+}
+
+#dashboard .back-btn[style*="display: block"],
+#dashboard .back-btn[style*="display:block"] {
+    display: flex !important;
+}
+
+#dashboard .back-btn svg{
+    display: block;
 }
 
 #notifications_content .wrapper .heading,

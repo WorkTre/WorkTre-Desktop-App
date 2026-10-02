@@ -689,7 +689,7 @@
                 document.getElementById("empShift").innerText = empShift;
 
                 document.getElementById("loginPage").style.display = "none";
-                document.getElementById("dashboard").style.display = "block";
+                document.getElementById("dashboard").style.display = "flex";
                 document.getElementById("loginCircle").classList.add("active");
                 document.getElementById("back_button").style.display = "none";
 

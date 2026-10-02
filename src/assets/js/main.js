@@ -724,7 +724,7 @@ async function updateDashboardWithUserData(userData, serviceData) {
 
     // Show dashboard
     setElementDisplay("loginPage", "none");
-    setElementDisplay("dashboard", "block");
+    setElementDisplay("dashboard", "flex");
     setElementDisplay("dashboard_content", "block");
 
     const loginCircle = document.getElementById("loginCircle");

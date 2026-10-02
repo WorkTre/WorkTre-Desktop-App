@@ -91,7 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
                window.localStorage.setItem("user_data", JSON.stringify(data))
 
                document.getElementById("loginPage").style.display = "none";
-               document.getElementById("dashboard").style.display = "block";
+               document.getElementById("dashboard").style.display = "flex";
                startTimer()
             } else {
                displaySplashForApi("none")
