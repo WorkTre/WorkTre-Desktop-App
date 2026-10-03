@@ -5,8 +5,14 @@ Application constants.
 
 # URLs
 UPDATE_URL = "https://raw.githubusercontent.com/WorkTre/WorkTre-Desktop-App/main/version.json"
+# SOAP endpoint is intentionally not derived from WORKTRE_BASE_URL.
 SOAP_BASE_URL = "https://worktre.com:443/webservices/worktre_soap_2.1.1/services.php"
-SS_UPLOAD_URL = "https://worktre.com/ss_upload/index"
+# Shared host for screenshot upload and desk-token HTTP calls.
+WORKTRE_BASE_URL = "https://worktre.com"
+SS_UPLOAD_URL = WORKTRE_BASE_URL + "/ss_upload/index"
+DESK_TOKEN_ISSUE_URL = WORKTRE_BASE_URL + "/desktoken/issue"
+DESK_TOKEN_RENEW_URL = WORKTRE_BASE_URL + "/desktoken/renew"
+DESK_TOKEN_REVOKE_URL = WORKTRE_BASE_URL + "/desktoken/revoke"
 
 # Application info
 APP_NAME = "WorkTre"
@@ -25,10 +31,14 @@ DEFAULT_INACTIVITY_LOGOUT = 600  # 10 minutes
 DEFAULT_INTERVAL = 300           # 5 minutes
 CONNECTION_TIMEOUT = 30          # 30 seconds
 REQUEST_TIMEOUT = 10             # 10 seconds
+DESK_TOKEN_TIMEOUT = REQUEST_TIMEOUT
+DESK_TOKEN_RENEW_LEAD = HOUR     # renew about one hour before expires_at
 
 # File constants
-KEY_FILE = "remember_me.key"
-DATA_FILE = "remember_me.json"
+KEY_FILE = "remember_me.key"          # legacy Fernet key (migrated once)
+DATA_FILE = "remember_me.json"        # legacy Fernet payload (migrated once)
+DPAPI_CREDENTIALS_FILE = "remember_me.dpapi"
+DESK_TOKEN_FILE = "desk_token.dpapi"
 LOG_FILE = "worktre.log"
 LOCK_FILE = "worktre.lock"
 

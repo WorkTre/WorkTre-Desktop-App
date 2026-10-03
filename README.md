@@ -71,6 +71,15 @@ The following resources are bundled into the executable:
 - Run all commands from the project root directory.
 - Make sure all required files exist before building the executable.
 - Recommended Python version is 3.8 or higher.
+- Screenshot uploads may include a desk token (`POST /desktoken/issue` on `https://worktre.com`). The token, username, and password are form fields only — never query parameters. The upload stays `requests.post(..., data=dict)` so base64 `+` is sent as `%2B`. A capture whose base64 is over 12 MB is re-encoded as JPEG (quality 80) and downscaled until it fits. Remember me and the token are stored with Windows DPAPI. A legacy Fernet remember-me file is migrated once and then deleted. Heartbeats keep running if a token cannot be obtained; the upload then omits the token. SOAP login is unchanged.
+
+## Tests
+
+```
+pip install pytest
+pytest
+python -m py_compile src/utils/dpapi.py src/utils/desk_token.py src/utils/security.py src/utils/screenshot.py src/main.py
+```
 
 ---
 

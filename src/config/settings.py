@@ -28,7 +28,11 @@ APP_VERSION = None  # Will be set later
 # URLs
 UPDATE_URL = constants.UPDATE_URL
 SOAP_BASE_URL = constants.SOAP_BASE_URL
+WORKTRE_BASE_URL = constants.WORKTRE_BASE_URL
 SS_UPLOAD_URL = constants.SS_UPLOAD_URL
+DESK_TOKEN_ISSUE_URL = constants.DESK_TOKEN_ISSUE_URL
+DESK_TOKEN_RENEW_URL = constants.DESK_TOKEN_RENEW_URL
+DESK_TOKEN_REVOKE_URL = constants.DESK_TOKEN_REVOKE_URL
 
 # Timeouts
 DEFAULT_TIMEOUT = constants.REQUEST_TIMEOUT
@@ -50,7 +54,7 @@ NOTIFICATION_MAX_COUNT = 5
 # Security
 KEY_FILE_NAME = constants.KEY_FILE
 DATA_FILE_NAME = constants.DATA_FILE
-ENCRYPTION_ALGORITHM = "fernet"
+ENCRYPTION_ALGORITHM = "dpapi"
 
 # SSL — verify certificates for SOAP/API calls (production trust)
 VERIFY_SSL = True

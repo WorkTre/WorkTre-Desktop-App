@@ -36,7 +36,7 @@ Current installer version: **2.2.3** · Per-user install under `%LOCALAPPDATA%\W
 ### 2.1 Login and identity
 
 - Email + password login against WorkTre SOAP (`worktre.com` web services).
-- **Remember me** — credentials stored encrypted locally (`%APPDATA%\WorkTre`).
+- **Remember me** — typed password stored with Windows DPAPI in `%APPDATA%\WorkTre`. An older Fernet file is migrated once, then removed.
 - **Forgot password** opens the web reset flow.
 - **IP allow-list** — if the PC’s IP is not registered, login is blocked and the employee can **request access**.
 - Login payload includes **computer name**, **app version**, and **IP**.
@@ -76,7 +76,8 @@ Current installer version: **2.2.3** · Per-user install under `%LOCALAPPDATA%\W
 - Captures **all monitors**.
 - **Blur before upload** — Off / Light / Medium (default) / Strong.
 - Employee must **acknowledge screenshot consent** if the company turns screenshots on.
-- Uploaded to WorkTre (`ss_upload`); **app / URL tracking is not enabled** in the Desktop App.
+- Uploaded to WorkTre (`ss_upload`) as a form-encoded body, with a desk token in that body when one is available. The token, username, and password are never placed in the URL. A capture whose base64 is over 12 MB is re-encoded as JPEG (quality 80) and downscaled until it fits. If a token cannot be issued or renewed, the upload still goes out without one and attendance keeps running.
+- **App / URL tracking is not enabled** in the Desktop App.
 
 ### 2.6 Privacy and trust (employee-visible)
 
@@ -108,7 +109,7 @@ Current installer version: **2.2.3** · Per-user install under `%LOCALAPPDATA%\W
 ### 2.9 Security and packaging
 
 - TLS certificate verification on SOAP/API calls.
-- Encrypted local remember-me store (Fernet).
+- Encrypted local remember-me and screenshot-token store (Windows DPAPI, current user). Tokens and passwords are not written to logs.
 - PyInstaller Windows `.exe` + Inno Setup per-user installer (no admin required).
 - System resource logging (CPU / memory / disk) for support, not for manager dashboards.
 
@@ -312,7 +313,7 @@ Heartbeats may queue offline so hours are not silently lost.
 | Topic | Practice |
 |---|---|
 | Desktop install | Download installer → run (no admin) → log in → first heartbeat on dashboard within minutes |
-| Desktop data on device | `%APPDATA%\WorkTre` (prefs, logs, encrypted remember-me) |
+| Desktop data on device | `%APPDATA%\WorkTre` (prefs, logs, DPAPI remember-me and screenshot token) |
 | Transport | TLS verification enabled for SOAP/API |
 | Web | Role dashboards, payroll close-out, attendance alerts, integrations |
 | Pilot checklist | 5–10 PCs → log in → Settings matches policy → manager sees online in ~5 minutes → run attendance alerts + one payroll close-out |

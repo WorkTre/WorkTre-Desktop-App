@@ -23,24 +23,79 @@ import certifi
 from ..config import constants, settings
 from .preferences import get_blur_radius
 
+# Server caps the upload body near 16 MB. 12 MB of base64 leaves room for
+# form percent-encoding without crossing that cap.
+MAX_UPLOAD_BASE64_CHARS = 12 * 1024 * 1024
+JPEG_FALLBACK_QUALITY = 80
+
+
+def _upload_error_code(response) -> Optional[str]:
+    """Read ``error`` or ``code`` from an upload response without logging the body."""
+    try:
+        from .desk_token import error_code_from_body
+        body = response.json()
+    except Exception:
+        return None
+    return error_code_from_body(body)
+
+
+def _image_from_base64(b64_string: str):
+    """Decode a screenshot payload into a detached PIL image."""
+    raw = base64.b64decode(b64_string)
+    with BytesIO(raw) as handle:
+        image = Image.open(handle)
+        image.load()
+        return image.copy()
+
+
+def _encode_jpeg_base64(image, quality: int) -> str:
+    """JPEG base64 at the given quality. Callers log the length, not the bytes."""
+    if image.mode not in ("RGB", "L"):
+        image = image.convert("RGB")
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", quality=quality)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
+def _jpeg_resample():
+    resampling = getattr(Image, "Resampling", Image)
+    return resampling.LANCZOS
+
 
 class ScreenshotManager:
     """Manager for screenshot capture and upload."""
 
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, token_manager=None):
         self.logger = logger
+        self._token_manager = token_manager
         self._upload_queue = []
         self._upload_thread = None
         self._running = False
         self._upload_url = constants.SS_UPLOAD_URL
 
     def _log(self, message: str, level: str = "info"):
-        """Log message if logger exists."""
+        """Log message if logger exists. Never include upload tokens."""
+        safe = self._redact(str(message))
         if self.logger:
             log_func = getattr(self.logger, level, self.logger.info)
-            log_func(f"[Screenshot] {message}")
+            log_func(f"[Screenshot] {safe}")
         else:
-            print(f"[Screenshot] {message}")
+            print(f"[Screenshot] {safe}")
+
+    def _redact(self, message: str) -> str:
+        token = getattr(self, "_last_token", None)
+        if token and token in message:
+            return message.replace(token, "[redacted]")
+        return message
+
+    def _token_api(self):
+        if self._token_manager is not None:
+            return self._token_manager
+        try:
+            from .desk_token import get_token_manager
+            return get_token_manager(self.logger)
+        except Exception:
+            return None
 
     def _apply_privacy_blur(self, image):
         """Apply Gaussian blur based on local privacy preferences."""
@@ -109,34 +164,169 @@ class ScreenshotManager:
                 return False
 
         try:
-            url = f"{self._upload_url}?userid={user_id}"
-            payload = {
-                "userid": user_id,
-                "file": b64_string,
-                "timestamp": str(int(time.time())),
-                "format": "PNG"
-            }
-
-            response = requests.post(
-                url,
-                data=payload,
-                timeout=10,
-                verify=(certifi.where() if settings.VERIFY_SSL else False)
-            )
-
-            if response.status_code == 200:
+            fitted = self._fit_upload_payload(b64_string)
+            if not fitted:
+                self._log("Screenshot upload skipped after the size check", "error")
+                return False
+            b64_string, image_format = fitted
+            token = self._current_upload_token()
+            status, code = self._post_upload(user_id, b64_string, token, image_format)
+            if status == 401 and code in ("token_invalid", "token_expired"):
+                fresh = self._recover_upload_token()
+                status, code = self._post_upload(user_id, b64_string, fresh, image_format)
+            if status == 200:
                 self._log(f"Screenshot uploaded successfully for user {user_id}")
                 return True
-            else:
-                self._log(f"Upload failed with status {response.status_code}", "error")
-                return False
+            self._log(f"Upload failed with status {status}", "error")
+            return False
 
         except requests.exceptions.RequestException as e:
-            self._log(f"Upload request failed: {e}", "error")
+            self._log(f"Upload request failed: {type(e).__name__}", "error")
             return False
         except Exception as e:
-            self._log(f"Upload failed: {e}", "error")
+            self._log(f"Upload failed: {type(e).__name__}", "error")
             return False
+
+    def _current_upload_token(self) -> Optional[str]:
+        manager = self._token_api()
+        if manager is None:
+            return None
+        try:
+            token = manager.get_upload_token()
+        except Exception:
+            return None
+        self._last_token = token
+        return token
+
+    def _recover_upload_token(self) -> Optional[str]:
+        manager = self._token_api()
+        if manager is None:
+            return None
+        try:
+            token = manager.recover_after_rejected_token()
+        except Exception:
+            token = None
+        self._last_token = token
+        return token
+
+    def _fit_upload_payload(self, b64_string: str):
+        """
+        Keep the base64 payload at or under MAX_UPLOAD_BASE64_CHARS.
+
+        A PNG over the limit is re-encoded as JPEG quality 80. If that is still
+        over the limit, the same image is downscaled proportionally until it fits.
+        Logs sizes only.
+        """
+        limit = MAX_UPLOAD_BASE64_CHARS
+        original_size = len(b64_string)
+        if original_size <= limit:
+            return b64_string, "PNG"
+
+        self._log(
+            f"Screenshot base64 size {original_size} exceeds {limit}; "
+            f"re-encoding as JPEG quality {JPEG_FALLBACK_QUALITY}"
+        )
+        if not PIL_AVAILABLE:
+            self._log(f"Cannot shrink screenshot; base64 size {original_size}", "error")
+            return None
+        try:
+            image = _image_from_base64(b64_string)
+        except Exception:
+            self._log(
+                f"Cannot read screenshot for resize; base64 size {original_size}",
+                "error",
+            )
+            return None
+
+        jpeg_b64 = _encode_jpeg_base64(image, JPEG_FALLBACK_QUALITY)
+        jpeg_size = len(jpeg_b64)
+        self._log(f"Re-encoded JPEG base64 size {jpeg_size}")
+        if jpeg_size <= limit:
+            return jpeg_b64, "JPEG"
+
+        self._log(
+            f"JPEG base64 size {jpeg_size} still exceeds {limit}; "
+            f"downscaling from {image.size[0]}x{image.size[1]}"
+        )
+        shrunk = self._downscale_until_fit(image, limit, jpeg_b64)
+        if shrunk is None:
+            return None
+        return shrunk, "JPEG"
+
+    def _downscale_until_fit(self, image, limit: int, jpeg_b64: str) -> Optional[str]:
+        """Shrink `image` proportionally until its JPEG base64 fits `limit`."""
+        resample = _jpeg_resample()
+        width, height = image.size
+        aspect = (height / float(width)) if width else 1.0
+        seen = set()
+        while len(jpeg_b64) > limit:
+            if width <= 1 and height <= 1:
+                self._log(
+                    f"Screenshot base64 size {len(jpeg_b64)} still exceeds {limit} "
+                    f"at {width}x{height}",
+                    "error",
+                )
+                return None
+            scale = (limit / float(len(jpeg_b64))) ** 0.5
+            # Stay under 1 so each pass actually shrinks, including when JPEG
+            # overhead dwarfs the pixel count.
+            scale = min(0.85, max(0.25, scale * 0.9))
+            new_w = max(1, int(width * scale))
+            new_h = max(1, int(round(new_w * aspect)))
+            if (new_w, new_h) == (width, height) or (new_w, new_h) in seen:
+                new_w = max(1, width // 2)
+                new_h = max(1, int(round(new_w * aspect)))
+            seen.add((new_w, new_h))
+            self._log(
+                f"Downscaling screenshot from {width}x{height} to {new_w}x{new_h}, "
+                f"base64 size {len(jpeg_b64)}"
+            )
+            image = image.resize((new_w, new_h), resample)
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            width, height = image.size
+            jpeg_b64 = _encode_jpeg_base64(image, JPEG_FALLBACK_QUALITY)
+            self._log(f"Downscaled screenshot base64 size {len(jpeg_b64)} at {width}x{height}")
+            if len(seen) > 24:
+                break
+        if len(jpeg_b64) > limit:
+            self._log(
+                f"Screenshot base64 size {len(jpeg_b64)} still exceeds {limit}",
+                "error",
+            )
+            return None
+        return jpeg_b64
+
+    def _post_upload(self, user_id: str, b64_string: str, token: Optional[str],
+                     image_format: str = "PNG"):
+        """POST the screenshot. userid stays on the URL; token stays in the body.
+
+        ``data=`` must stay a dict so requests form-encodes it. Base64 ``+``
+        has to leave as ``%2B``; a raw ``+`` is decoded as a space.
+        """
+        url = f"{self._upload_url}?userid={user_id}"
+        payload = {
+            "userid": user_id,
+            "file": b64_string,
+            "timestamp": str(int(time.time())),
+            "format": image_format,
+        }
+        if token:
+            payload["token"] = token
+            self._last_token = token
+
+        response = requests.post(
+            url,
+            data=payload,
+            timeout=constants.REQUEST_TIMEOUT,
+            verify=(certifi.where() if settings.VERIFY_SSL else False),
+            allow_redirects=False,
+        )
+        code = None
+        if response.status_code == 401:
+            code = _upload_error_code(response)
+        self._log(f"Upload status {response.status_code} code={code or '-'}")
+        return response.status_code, code
 
     def upload_async(self, user_id: str, callback: Optional[callable] = None):
         """Upload screenshot asynchronously."""

@@ -27,6 +27,8 @@ a = Analysis(
         'src.ui.dialogs',
         'src.ui.window',
         'src.utils.security',
+        'src.utils.dpapi',
+        'src.utils.desk_token',
         'src.utils.screenshot',
         'src.utils.update',
         'src.utils.updater',

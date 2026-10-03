@@ -318,7 +318,7 @@ def build():
     story.append(Paragraph("2.1 Login and identity", styles["H2"]))
     story.append(bullets([
         "Email + password against WorkTre SOAP (worktre.com web services).",
-        "Remember me — credentials stored encrypted locally in %APPDATA%\\WorkTre.",
+        "Remember me — typed password stored with Windows DPAPI in %APPDATA%\\WorkTre.",
         "Forgot password opens the web reset flow.",
         "IP allow-list: unregistered IPs are blocked; employee can request access.",
         "Login payload includes computer name, app version, and IP.",
@@ -362,7 +362,7 @@ def build():
         "Completed idle windows (start + end) are sent on the heartbeat.",
         "Heartbeat (~5 minutes) powers online / idle / stale on the web dashboard.",
         "Offline queue — heartbeats sync when the network returns.",
-        "Screenshots only if the company enables them; all monitors; blur before upload (Off / Light / Medium / Strong).",
+        "Screenshots only if the company enables them; all monitors; blur before upload (Off / Light / Medium / Strong). Oversized shots are re-encoded as JPEG under 12 MB.",
         "Employee acknowledges screenshot consent. App / URL tracking is not enabled.",
     ], styles))
 
@@ -392,7 +392,7 @@ def build():
         "Auto-start at Windows logon (installer Run registry key).",
         "Start Menu + Desktop shortcuts; Add/Remove Programs uninstall.",
         "In-app auto-update (.exe download, UAC elevation if needed).",
-        "TLS certificate verification on SOAP/API. Encrypted remember-me store.",
+        "TLS certificate verification on SOAP/API. Remember me and screenshot token use Windows DPAPI.",
         "PyInstaller Windows .exe + Inno Setup per-user installer (no admin required).",
     ], styles))
     story.append(Paragraph(
@@ -547,7 +547,7 @@ def build():
             [cell("Desktop install", styles),
              cell("Download installer → run (no admin) → log in → first heartbeat on dashboard within minutes", styles)],
             [cell("Desktop data on device", styles),
-             cell("%APPDATA%\\WorkTre (prefs, logs, encrypted remember-me)", styles)],
+             cell("%APPDATA%\\WorkTre (prefs, logs, DPAPI remember-me and screenshot token)", styles)],
             [cell("Transport", styles), cell("TLS verification enabled for SOAP/API", styles)],
             [cell("Web", styles),
              cell("Role dashboards, payroll close-out, attendance alerts, integrations", styles)],
