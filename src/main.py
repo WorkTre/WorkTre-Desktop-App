@@ -666,7 +666,12 @@ class WorkTreApp:
             manager = self._desk_token_manager()
             if employee_id:
                 manager.set_employee_id(employee_id)
-            manager.issue_async(username, password, reset_rejection=True)
+            manager.issue_async(
+                username,
+                password,
+                reset_rejection=True,
+                ignore_backoff=True,
+            )
         except Exception as e:
             if self.logger:
                 self.logger.error(f"Desk token issue was not scheduled: {e}")

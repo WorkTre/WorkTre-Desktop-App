@@ -149,6 +149,17 @@ def route(monkeypatch, handler):
     monkeypatch.setattr(requests, "post", _post)
 
 
+def freeze_desk_clock(monkeypatch, start=None):
+    """Mutable stand-in for ``desk_token.time.time``. Equal to the deadline is allowed."""
+    state = {"now": time.time() if start is None else float(start)}
+
+    def _now():
+        return state["now"]
+
+    monkeypatch.setattr(desk_token.time, "time", _now)
+    return state
+
+
 class TestTokenHttp:
     def test_issue_renew_revoke_200(self, tmp_path, logger, monkeypatch):
         calls = []
@@ -335,6 +346,180 @@ class TestTokenHttp:
         assert renewed.ok
         assert calls == [constants.DESK_TOKEN_RENEW_URL]
         assert manager.get_upload_token() == OTHER_TOKEN
+
+
+class TestFailureBackoff:
+    def test_maintain_404_issues_once_inside_the_hour(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        calls = []
+
+        def handler(url, data, kwargs):
+            calls.append(url)
+            assert data["password"] == PASSWORD
+            return FakeResponse(404, {"error": "not_found"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        first = manager.maintain()
+        assert first.error == "endpoint_unavailable"
+        assert first.status_code == 404
+
+        for step in (0, 60, 300, 3599):
+            clock["now"] = start + step
+            again = manager.maintain()
+            assert again.error == "backoff"
+            assert calls == [constants.DESK_TOKEN_ISSUE_URL]
+
+        clock["now"] = start + 3600
+        assert manager.maintain().error == "endpoint_unavailable"
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL, constants.DESK_TOKEN_ISSUE_URL]
+        assert PASSWORD not in logger.text
+
+    def test_maintain_5xx_backoff_doubles_from_five_minutes(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            assert url == constants.DESK_TOKEN_ISSUE_URL
+            return FakeResponse(503, {})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+
+        assert manager.maintain().error == "server_error"
+        assert calls["n"] == 1
+
+        clock["now"] = start + 299
+        assert manager.maintain().error == "backoff"
+        assert calls["n"] == 1
+
+        clock["now"] = start + 300
+        assert manager.maintain().status_code == 503
+        assert calls["n"] == 2
+
+        clock["now"] = start + 300 + 599
+        assert manager.maintain().error == "backoff"
+        assert calls["n"] == 2
+
+        clock["now"] = start + 300 + 600
+        assert manager.maintain().status_code == 503
+        assert calls["n"] == 3
+
+    def test_success_resets_failure_backoff(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        planned = [
+            FakeResponse(500, {}),
+            FakeResponse(200, ok_body(TOKEN)),
+            FakeResponse(500, {}),
+            FakeResponse(500, {}),
+        ]
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            response = planned[calls["n"]]
+            calls["n"] += 1
+            return response
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+
+        assert manager.maintain().status_code == 500
+        clock["now"] = start + 300
+        assert manager.maintain().ok
+        assert manager.get_upload_token() == TOKEN
+
+        manager.clear_local()
+        assert manager.get_upload_token() is None
+        assert manager.maintain().status_code == 500
+        assert calls["n"] == 3
+
+        clock["now"] = start + 300 + 299
+        assert manager.maintain().error == "backoff"
+        assert calls["n"] == 3
+
+        clock["now"] = start + 300 + 300
+        assert manager.maintain().status_code == 500
+        assert calls["n"] == 4
+
+    def test_manual_login_bypasses_failure_backoff(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            assert data["password"] == PASSWORD
+            return FakeResponse(404, {})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        assert manager.maintain().error == "endpoint_unavailable"
+        assert calls["n"] == 1
+
+        clock["now"] = start + 10
+        assert manager.maintain().error == "backoff"
+        assert manager.issue("ada", PASSWORD).error == "backoff"
+        assert calls["n"] == 1
+
+        logged_in = manager.issue("ada", PASSWORD, ignore_backoff=True)
+        assert logged_in.error == "endpoint_unavailable"
+        assert calls["n"] == 2
+
+        assert manager.maintain().error == "backoff"
+        assert calls["n"] == 2
+        assert PASSWORD not in logger.text
+
+    def test_recover_respects_failure_backoff(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        calls = []
+
+        def handler(url, data, kwargs):
+            calls.append(url)
+            if url == constants.DESK_TOKEN_RENEW_URL:
+                return FakeResponse(503, {})
+            return FakeResponse(404, {})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+
+        assert manager.recover_after_rejected_token() is None
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL]
+        assert manager.recover_after_rejected_token() is None
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL]
+
+        clock["now"] = start + 3600
+        manager.clear_local()
+        seed_token(manager, expires_in=30)
+        manager._record["expires_at_epoch"] = clock["now"] + 30
+        assert manager.recover_after_rejected_token() is None
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL, constants.DESK_TOKEN_RENEW_URL]
+        assert manager.recover_after_rejected_token() is None
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL, constants.DESK_TOKEN_RENEW_URL]
+        assert PASSWORD not in logger.text
+
+    def test_transport_error_uses_the_five_minute_backoff(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            raise ConnectionError("down")
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        assert manager.maintain().error == "network"
+        clock["now"] = start + 299
+        assert manager.maintain().error == "backoff"
+        assert calls["n"] == 1
+        clock["now"] = start + 300
+        assert manager.maintain().error == "network"
+        assert calls["n"] == 2
 
 
 class TestReauth:

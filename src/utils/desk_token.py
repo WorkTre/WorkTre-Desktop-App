@@ -29,6 +29,17 @@ from . import dpapi
 
 _FORBIDDEN_QUERY_KEYS = ("token", "password", "username")
 _AUTH_REFRESH_ERRORS = ("reauth_required", "token_expired", "token_invalid")
+# These failures are not infrastructure outages and must not arm the retry backoff.
+_NO_FAILURE_BACKOFF = frozenset({
+    "invalid_credentials",
+    "rate_limited",
+    "reauth_required",
+    "token_expired",
+    "token_invalid",
+    "no_token",
+    "superseded",
+    "backoff",
+})
 _LOGGER_NAME = "worktre.desk_token"
 
 
@@ -224,6 +235,8 @@ class TokenManager:
         self._record: Optional[dict] = None
         self._generation = 0
         self._blocked_until = 0.0
+        self._failure_blocked_until = 0.0
+        self._failure_backoff_seconds = 0.0
         self._employee_id: Optional[str] = None
         self._credentials_rejected = False
         self._reauth_notice_sent = False
@@ -281,8 +294,9 @@ class TokenManager:
         computer_name: Optional[str] = None,
         app_version: Optional[str] = None,
         reset_rejection: bool = False,
+        ignore_backoff: bool = False,
     ) -> TokenResult:
-        """POST /desktoken/issue. Does not retry."""
+        """POST /desktoken/issue. Does not retry. Manual login sets ``ignore_backoff``."""
         if not username or not password:
             return TokenResult(ok=False, error="bad_request")
         with self._lock:
@@ -294,6 +308,13 @@ class TokenManager:
                     ok=False,
                     error="rate_limited",
                     retry_after=self._retry_remaining_locked(),
+                )
+            # A SOAP sign-in always tries once. Keep-alive and upload recovery do not.
+            if not (ignore_backoff or reset_rejection) and self._failure_limited_locked():
+                return TokenResult(
+                    ok=False,
+                    error="backoff",
+                    retry_after=self._failure_remaining_locked(),
                 )
             generation = self._generation
         fields = {"username": username, "password": password}
@@ -314,6 +335,12 @@ class TokenManager:
                     ok=False,
                     error="rate_limited",
                     retry_after=self._retry_remaining_locked(),
+                )
+            if self._failure_limited_locked():
+                return TokenResult(
+                    ok=False,
+                    error="backoff",
+                    retry_after=self._failure_remaining_locked(),
                 )
             token = (self._record or {}).get("token")
             generation = self._generation
@@ -343,11 +370,17 @@ class TokenManager:
         """Revoke without blocking logout."""
         threading.Thread(target=self._revoke_background, name="desk-token-revoke", daemon=True).start()
 
-    def issue_async(self, username: str, password: str, reset_rejection: bool = False) -> None:
+    def issue_async(
+        self,
+        username: str,
+        password: str,
+        reset_rejection: bool = False,
+        ignore_backoff: bool = False,
+    ) -> None:
         """Issue after SOAP login. Returns immediately."""
         threading.Thread(
             target=self._issue_background,
-            args=(username, password, reset_rejection),
+            args=(username, password, reset_rejection, ignore_backoff),
             name="desk-token-issue",
             daemon=True,
         ).start()
@@ -434,7 +467,7 @@ class TokenManager:
         """
         try:
             with self._lock:
-                if self._rate_limited_locked():
+                if self._rate_limited_locked() or self._failure_limited_locked():
                     return None
                 has_token = bool(self._record and self._record.get("token"))
             renewed_error = None
@@ -442,7 +475,9 @@ class TokenManager:
                 renewed = self.renew()
                 if renewed.ok and renewed.token:
                     return renewed.token
-                if renewed.error == "rate_limited":
+                if renewed.error == "rate_limited" or renewed.error == "backoff":
+                    return None
+                if _arms_failure_backoff(renewed):
                     return None
                 renewed_error = renewed.error
             saved = None if self._credentials_rejected else self._saved_credentials()
@@ -473,9 +508,20 @@ class TokenManager:
         with self._lock:
             self._clear_locked()
 
-    def _issue_background(self, username: str, password: str, reset_rejection: bool) -> None:
+    def _issue_background(
+        self,
+        username: str,
+        password: str,
+        reset_rejection: bool,
+        ignore_backoff: bool = False,
+    ) -> None:
         try:
-            self.issue(username, password, reset_rejection=reset_rejection)
+            self.issue(
+                username,
+                password,
+                reset_rejection=reset_rejection,
+                ignore_backoff=ignore_backoff,
+            )
         except Exception:
             self._log("background issue failed", "error")
 
@@ -502,7 +548,15 @@ class TokenManager:
             self._log("revoke failed", "warning")
 
     def _issue_saved_quietly(self) -> TokenResult:
-        if self._credentials_rejected:
+        with self._lock:
+            if self._failure_limited_locked():
+                return TokenResult(
+                    ok=False,
+                    error="backoff",
+                    retry_after=self._failure_remaining_locked(),
+                )
+            rejected = self._credentials_rejected
+        if rejected:
             return TokenResult(ok=False, error="invalid_credentials")
         saved = self._saved_credentials()
         if not saved:
@@ -551,9 +605,12 @@ class TokenManager:
             if result.error == "rate_limited":
                 self._set_rate_limit_locked(result.retry_after or 60)
                 return result
+            success = bool(result.ok and record)
+            if success:
+                self._reset_failure_backoff_locked()
             if self._generation != generation:
                 return TokenResult(ok=False, error="superseded", status_code=result.status_code)
-            if result.ok and record:
+            if success:
                 self._store_record_locked(record)
                 self._credentials_rejected = False
                 self._reauth_notice_sent = False
@@ -562,6 +619,8 @@ class TokenManager:
                 return result
             if invalid_sets_rejection and result.error == "invalid_credentials":
                 self._credentials_rejected = True
+            if _arms_failure_backoff(result):
+                self._arm_failure_backoff_locked(result)
             return result
 
     def _store_record_locked(self, record: dict) -> None:
@@ -577,6 +636,7 @@ class TokenManager:
             self._log("desk token kept in memory; DPAPI unavailable")
 
     def _clear_locked(self) -> None:
+        # Backoff stays. Dropping the token must not make the next keep-alive retry immediately.
         self._record = None
         self._generation += 1
         self._store.clear()
@@ -622,6 +682,28 @@ class TokenManager:
         if delay < 0:
             delay = 0.0
         self._blocked_until = time.time() + delay
+
+    def _failure_limited_locked(self) -> bool:
+        return time.time() < self._failure_blocked_until
+
+    def _failure_remaining_locked(self) -> float:
+        return max(0.0, self._failure_blocked_until - time.time())
+
+    def _reset_failure_backoff_locked(self) -> None:
+        self._failure_backoff_seconds = 0.0
+        self._failure_blocked_until = 0.0
+
+    def _arm_failure_backoff_locked(self, result: TokenResult) -> None:
+        maximum = float(constants.DESK_TOKEN_FAILURE_BACKOFF_MAX)
+        if result.status_code == 404 or result.error == "endpoint_unavailable":
+            delay = maximum
+        elif self._failure_backoff_seconds <= 0:
+            delay = float(constants.DESK_TOKEN_FAILURE_BACKOFF_INITIAL)
+        else:
+            delay = min(self._failure_backoff_seconds * 2, maximum)
+        self._failure_backoff_seconds = delay
+        self._failure_blocked_until = time.time() + delay
+        self._log(f"backing off {int(delay)}s error={result.error or '-'}", "warning")
 
     def _saved_credentials(self) -> Optional[Tuple[str, str]]:
         try:
@@ -715,6 +797,8 @@ def _interpret(response, action: str) -> Tuple[TokenResult, Optional[dict]]:
     error = error_code_from_body(body)
     if action == "revoke" and status == 200:
         return TokenResult(ok=True, status_code=status), None
+    if status == 404:
+        return TokenResult(ok=False, error="endpoint_unavailable", status_code=status), None
     if status == 429 or error == "rate_limited":
         return (
             TokenResult(
@@ -742,7 +826,18 @@ def _interpret(response, action: str) -> Tuple[TokenResult, Optional[dict]]:
         return TokenResult(ok=False, error=error or "unauthorized", status_code=status), None
     if status == 400:
         return TokenResult(ok=False, error=error or "bad_request", status_code=status), None
+    if 500 <= status <= 599:
+        return TokenResult(ok=False, error=error or "server_error", status_code=status), None
     return TokenResult(ok=False, error=error or "http_error", status_code=status), None
+
+
+def _arms_failure_backoff(result: TokenResult) -> bool:
+    """404, 5xx, transport errors, and unusable 200s. Auth failures do not."""
+    if result.ok or not result.error:
+        return False
+    if result.status_code == 404 or result.error == "endpoint_unavailable":
+        return True
+    return result.error not in _NO_FAILURE_BACKOFF
 
 
 def _default_credential_loader():

@@ -33,6 +33,9 @@ CONNECTION_TIMEOUT = 30          # 30 seconds
 REQUEST_TIMEOUT = 10             # 10 seconds
 DESK_TOKEN_TIMEOUT = REQUEST_TIMEOUT
 DESK_TOKEN_RENEW_LEAD = HOUR     # renew about one hour before expires_at
+# Non-auth issue/renew failures (404, 5xx, transport, bad response).
+DESK_TOKEN_FAILURE_BACKOFF_INITIAL = 5 * MINUTE
+DESK_TOKEN_FAILURE_BACKOFF_MAX = HOUR
 
 # File constants
 KEY_FILE = "remember_me.key"          # legacy Fernet key (migrated once)
