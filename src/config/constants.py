@@ -32,7 +32,9 @@ DEFAULT_INTERVAL = 300           # 5 minutes
 CONNECTION_TIMEOUT = 30          # 30 seconds
 REQUEST_TIMEOUT = 10             # 10 seconds
 DESK_TOKEN_TIMEOUT = REQUEST_TIMEOUT
-DESK_TOKEN_RENEW_LEAD = HOUR     # renew about one hour before expires_at
+DESK_TOKEN_RENEW_LEAD = HOUR     # renew about one hour before local expiry
+# Crash login must not issue again if this EID was just issued.
+DESK_TOKEN_RECENT_ISSUE = 3 * MINUTE
 # Non-auth issue/renew failures (404, 5xx, transport, bad response).
 DESK_TOKEN_FAILURE_BACKOFF_INITIAL = 5 * MINUTE
 DESK_TOKEN_FAILURE_BACKOFF_MAX = HOUR

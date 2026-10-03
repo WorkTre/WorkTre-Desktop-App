@@ -71,7 +71,7 @@ The following resources are bundled into the executable:
 - Run all commands from the project root directory.
 - Make sure all required files exist before building the executable.
 - Recommended Python version is 3.8 or higher.
-- Screenshot uploads may include a desk token (`POST /desktoken/issue` on `https://worktre.com`). The token, username, and password are form fields only — never query parameters. The upload stays `requests.post(..., data=dict)` so base64 `+` is sent as `%2B`. A capture whose base64 is over 12 MB is re-encoded as JPEG (quality 80) and downscaled until it fits. Remember me and the token are stored with Windows DPAPI. A legacy Fernet remember-me file is migrated once and then deleted. Heartbeats keep running if a token cannot be obtained; the upload then omits the token. SOAP login is unchanged.
+- Screenshot uploads may include a desk token (`POST /desktoken/issue` on `https://worktre.com`). The token, username, and password are form fields only — never query parameters, and desk-token logs record an employee id at most, never the username, password, token, or raw server error text. The upload stays `requests.post(..., data=dict)` so base64 `+` is sent as `%2B`. A capture whose base64 is over 12 MB (a conservative backstop; the server cap is about 42 MB) is re-encoded as JPEG (quality 80) and downscaled until it fits. A server `413` with `too_large` is retried once as a smaller JPEG; a `400` is not retried. Remember me and the token are stored with Windows DPAPI. A legacy Fernet remember-me file is migrated once, read back, and only then deleted. Heartbeats keep running if a token cannot be obtained; the upload then omits the token. SOAP login is unchanged.
 
 ## Tests
 

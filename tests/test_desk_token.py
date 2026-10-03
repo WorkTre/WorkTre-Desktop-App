@@ -3,7 +3,6 @@
 import base64
 import json
 import logging
-import sys
 import time
 from io import BytesIO
 from pathlib import Path
@@ -361,6 +360,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
         first = manager.maintain()
         assert first.error == "endpoint_unavailable"
         assert first.status_code == 404
@@ -388,6 +388,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
 
         assert manager.maintain().error == "server_error"
         assert calls["n"] == 1
@@ -426,6 +427,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
 
         assert manager.maintain().status_code == 500
         clock["now"] = start + 300
@@ -457,6 +459,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
         assert manager.maintain().error == "endpoint_unavailable"
         assert calls["n"] == 1
 
@@ -486,6 +489,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
 
         assert manager.recover_after_rejected_token() is None
         assert calls == [constants.DESK_TOKEN_ISSUE_URL]
@@ -513,6 +517,7 @@ class TestFailureBackoff:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
         assert manager.maintain().error == "network"
         clock["now"] = start + 299
         assert manager.maintain().error == "backoff"
@@ -541,6 +546,7 @@ class TestReauth:
         manager = make_manager(
             tmp_path, logger, loader=lambda: {"email": "ada", "password": PASSWORD}, notices=notices
         )
+        manager.set_session("7", "ada")
         seed_token(manager, expires_in=60)
         result = manager.maintain()
         assert result.ok
@@ -580,6 +586,7 @@ class TestReauth:
 
         route(monkeypatch, handler)
         manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("9", "ada")
         seed_token(manager, employee_id="9")
         assert manager.handle_crash_login("9") == "issued"
         assert calls[0][0] == constants.DESK_TOKEN_ISSUE_URL
@@ -617,7 +624,7 @@ class TestUpload:
             if "/desktoken/" in url:
                 token_calls.append(url)
                 assert list(data) == ["token"]
-                return FakeResponse(200, ok_body(OTHER_TOKEN))
+                return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=42))
             uploads.append(dict(data))
             if len(uploads) == 1:
                 assert data["token"] == TOKEN
@@ -627,7 +634,8 @@ class TestUpload:
 
         route(monkeypatch, handler)
         tokens = self._manager(tmp_path, logger)
-        seed_token(tokens)
+        tokens.set_session("42", "ada")
+        seed_token(tokens, employee_id="42")
         manager = ScreenshotManager(logger=logger, token_manager=tokens)
         assert manager.upload("42", base64_data="abc") is True
         assert len(uploads) == 2
@@ -641,7 +649,7 @@ class TestUpload:
                 return FakeResponse(401, {"error": "token_invalid"})
             if url == constants.DESK_TOKEN_ISSUE_URL:
                 assert data["password"] == PASSWORD
-                return FakeResponse(200, ok_body(OTHER_TOKEN))
+                return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=42))
             uploads.append(dict(data))
             if len(uploads) == 1:
                 return FakeResponse(401, {"code": "token_expired"})
@@ -649,7 +657,8 @@ class TestUpload:
 
         route(monkeypatch, handler)
         tokens = self._manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
-        seed_token(tokens)
+        tokens.set_session("42", "ada")
+        seed_token(tokens, employee_id="42")
         manager = ScreenshotManager(logger=logger, token_manager=tokens)
         assert manager.upload("42", base64_data="abc") is True
         assert len(uploads) == 2
@@ -669,7 +678,8 @@ class TestUpload:
 
         route(monkeypatch, handler)
         tokens = self._manager(tmp_path, logger, loader=lambda: None, notices=notices)
-        seed_token(tokens)
+        tokens.set_session("42", "ada")
+        seed_token(tokens, employee_id="42")
         manager = ScreenshotManager(logger=logger, token_manager=tokens)
         assert manager.upload("42", base64_data="abc") is True
         assert len(uploads) == 2
@@ -983,8 +993,441 @@ def _use_xor_dpapi(monkeypatch):
         return bytes(byte ^ 0x5A for byte in data)
 
     monkeypatch.setattr(dpapi, "is_available", lambda: True)
-    monkeypatch.setattr(dpapi, "protect", xor)
-    monkeypatch.setattr(dpapi, "unprotect", xor)
+    monkeypatch.setattr(dpapi, "protect", lambda data: xor(data))
+    monkeypatch.setattr(dpapi, "unprotect", lambda data: xor(data))
+    monkeypatch.setattr(dpapi, "unprotect_status", lambda data: (xor(data), False))
+
+
+class TestQaFixes:
+    def test_refuses_token_for_a_different_employee(self, tmp_path, logger, monkeypatch):
+        def handler(url, data, kwargs):
+            return FakeResponse(200, ok_body(TOKEN, employee_id=7))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("Ada", PASSWORD))
+        manager.set_session("8", "ada")
+        refused = manager.issue("ada", PASSWORD)
+        assert refused.ok is False
+        assert refused.error == "employee_mismatch"
+        assert manager.get_upload_token("8") is None
+        assert manager.get_upload_token("7") is None
+
+        manager.set_session("7", "ada")
+        assert manager.issue("ada", PASSWORD, ignore_backoff=True).ok
+        shots = ScreenshotManager(logger=logger, token_manager=manager)
+        posted = []
+
+        def upload_handler(url, data, kwargs):
+            posted.append(dict(data))
+            return FakeResponse(200, {})
+
+        route(monkeypatch, upload_handler)
+        assert shots.upload("7", base64_data="abc") is True
+        assert posted[0]["token"] == TOKEN
+        assert shots.upload("8", base64_data="abc") is True
+        assert "token" not in posted[1]
+
+    def test_saved_password_requires_the_signed_in_username(self, tmp_path, logger, monkeypatch):
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            return FakeResponse(200, ok_body(TOKEN, employee_id=7))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: (" Ada ", PASSWORD))
+        manager.set_session("9", "other@example.com")
+        assert manager.handle_crash_login("9") == "none"
+        assert calls["n"] == 0
+        manager.set_session("7", "ada")
+        assert manager.handle_crash_login("7") == "issued"
+        assert calls["n"] == 1
+
+    def test_untick_remember_me_deletes_the_file(self, tmp_path, monkeypatch):
+        _use_xor_dpapi(monkeypatch)
+        manager = security.SecurityManager(base_dir=str(tmp_path))
+        assert manager.save_credentials("ada@example.com", PASSWORD) is True
+        assert (tmp_path / constants.DPAPI_CREDENTIALS_FILE).exists()
+        assert manager.save_credentials("", "") is True
+        assert not (tmp_path / constants.DPAPI_CREDENTIALS_FILE).exists()
+
+    def test_concurrent_renew_uses_the_winner_and_skips(self, tmp_path, logger, monkeypatch):
+        import threading
+
+        clock = freeze_desk_clock(monkeypatch)
+        started = threading.Event()
+        release = threading.Event()
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            started.set()
+            assert release.wait(2)
+            return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=7, ttl=86400))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        manager.set_session("7", "ada")
+        seed_token(manager, employee_id="7", expires_in=60)
+        manager._record["expires_at_epoch"] = clock["now"] + 60
+
+        first = {}
+        second = {}
+
+        def run_first():
+            first["result"] = manager.renew()
+
+        def run_second():
+            second["result"] = manager.renew()
+
+        thread = threading.Thread(target=run_first)
+        thread.start()
+        assert started.wait(2)
+        other = threading.Thread(target=run_second)
+        other.start()
+        time.sleep(0.05)
+        release.set()
+        thread.join(2)
+        other.join(2)
+        assert calls["n"] == 1
+        assert first["result"].token == OTHER_TOKEN
+        assert second["result"].ok
+        assert second["result"].token == OTHER_TOKEN
+        assert manager.get_upload_token("7") == OTHER_TOKEN
+
+    def test_stale_token_invalid_does_not_clear_the_current_token(self, tmp_path, logger, monkeypatch):
+        def handler(url, data, kwargs):
+            manager._record = {
+                "token": OTHER_TOKEN,
+                "employee_id": "7",
+                "expires_at_epoch": time.time() + 86400,
+            }
+            return FakeResponse(401, {"error": "token_invalid"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: None, notices=[])
+        manager.set_session("7", "ada")
+        seed_token(manager, employee_id="7", expires_in=30)
+        result = manager.maintain()
+        assert result.error == "token_invalid"
+        assert manager.get_upload_token("7") == OTHER_TOKEN
+
+    def test_local_expiry_ignores_a_clock_that_is_slow_or_fast(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        local = clock["now"]
+        ttl = 86400
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # Local clock is 2 hours slow, so the server's expires_at is ahead of local+ttl.
+                return FakeResponse(200, ok_body(
+                    TOKEN,
+                    employee_id=7,
+                    ttl=ttl,
+                    expires_at=local + ttl + 2 * 3600,
+                    chain_expires_at=local + ttl + 2 * 3600 + 6 * 86400,
+                ))
+            return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=7, ttl=ttl))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        manager.set_session("7", "ada")
+        issued = manager.issue("ada", PASSWORD)
+        assert issued.ok
+        assert manager.snapshot()["expires_at_epoch"] == local + ttl
+        clock["now"] = local + ttl - 3600 - 1
+        assert manager.maintain().ok
+        assert calls["n"] == 1
+        clock["now"] = local + ttl - 3600
+        assert manager.maintain().token == OTHER_TOKEN
+        assert calls["n"] == 2
+
+        fast = make_manager(tmp_path, logger)
+        fast_clock = local + 25 * 3600
+        clock["now"] = fast_clock
+        calls["n"] = 0
+
+        def fast_handler(url, data, kwargs):
+            calls["n"] += 1
+            return FakeResponse(200, ok_body(
+                TOKEN,
+                employee_id=4,
+                ttl=ttl,
+                expires_at=fast_clock + ttl - 25 * 3600,
+                chain_expires_at=fast_clock + 7 * 86400,
+            ))
+
+        route(monkeypatch, fast_handler)
+        fast.set_session("4", "ada")
+        assert fast.issue("ada", PASSWORD).ok
+        assert fast.snapshot()["expires_at_epoch"] == fast_clock + ttl
+        assert fast.get_upload_token("4") == TOKEN
+        assert fast.maintain().ok
+        assert calls["n"] == 1
+        stored = dict(fast._record)
+        restarted = make_manager(tmp_path, logger)
+        restarted._store._memory = stored
+        restarted._record = None
+        clock["now"] = fast_clock + 10
+        assert restarted.restore_stored("4") is True
+        assert restarted.snapshot()["expires_at_epoch"] == stored["issued_at"] + stored["ttl_seconds"]
+        assert restarted.get_upload_token("4") == TOKEN
+
+    def test_crash_login_skips_a_recent_or_inflight_issue(self, tmp_path, logger, monkeypatch):
+        clock = freeze_desk_clock(monkeypatch)
+        calls = {"n": 0}
+
+        def handler(url, data, kwargs):
+            calls["n"] += 1
+            return FakeResponse(200, ok_body(TOKEN, employee_id=7))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: ("ada", PASSWORD))
+        manager.set_session("7", "ada")
+        assert manager.issue("ada", PASSWORD).ok
+        assert manager.handle_crash_login("7") == "skipped"
+        assert calls["n"] == 1
+        clock["now"] += constants.DESK_TOKEN_RECENT_ISSUE
+        assert manager.handle_crash_login("7") == "skipped"
+        clock["now"] += 1
+        assert manager.handle_crash_login("7") == "issued"
+        assert calls["n"] == 2
+
+        manager._issue_inflight = True
+        manager._inflight_employee_id = "7"
+        assert manager.handle_crash_login("7") == "skipped"
+        assert calls["n"] == 2
+
+    def test_token_expired_without_remember_me_notifies_once(self, tmp_path, logger, monkeypatch):
+        notices = []
+
+        def handler(url, data, kwargs):
+            return FakeResponse(401, {"error": "token_expired"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger, loader=lambda: None, notices=notices)
+        manager.set_session("7", "ada")
+        seed_token(manager, employee_id="7", expires_in=30)
+        assert manager.maintain().error == "token_expired"
+        assert notices == ["shown"]
+        assert manager.get_upload_token() is None
+        assert manager.maintain().error == "no_token"
+        assert notices == ["shown"]
+
+    def test_logout_during_issue_revokes_the_late_token(self, tmp_path, logger, monkeypatch):
+        revoked = []
+
+        def handler(url, data, kwargs):
+            if url == constants.DESK_TOKEN_ISSUE_URL:
+                manager.clear_local()
+                return FakeResponse(200, ok_body(TOKEN, employee_id=7))
+            revoked.append(data.get("token"))
+            return FakeResponse(200, {"status": "ok"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        manager.set_session("7", "ada")
+        result = manager.issue("ada", PASSWORD)
+        assert result.error == "superseded"
+        assert manager.get_upload_token("7") is None
+        assert revoked == [TOKEN]
+        assert TOKEN not in logger.text
+        assert PASSWORD not in logger.text
+
+    def test_logout_revokes_a_stored_token_before_deleting_it(self, tmp_path, logger, monkeypatch):
+        seen = {}
+
+        def handler(url, data, kwargs):
+            seen["token"] = data.get("token")
+            seen["still_stored"] = manager._store._memory is not None
+            return FakeResponse(200, {"status": "ok"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        seed_token(manager, employee_id="7")
+        manager._record = None
+        assert manager.revoke().ok
+        assert seen["token"] == TOKEN
+        assert seen["still_stored"] is True
+        assert manager._store._memory is None
+        assert manager.get_upload_token() is None
+
+    def test_failed_renew_save_drops_the_old_disk_token(self, tmp_path, logger, monkeypatch):
+        _use_xor_dpapi(monkeypatch)
+
+        def handler(url, data, kwargs):
+            if url == constants.DESK_TOKEN_ISSUE_URL:
+                return FakeResponse(200, ok_body(TOKEN, employee_id=7))
+            return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=7))
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        manager.set_session("7", "ada")
+        assert manager.issue("ada", PASSWORD).ok
+        path = tmp_path / constants.DESK_TOKEN_FILE
+        assert path.exists()
+        manager._record["expires_at_epoch"] = time.time() + 30
+
+        def fail_protect(data):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(dpapi, "protect", fail_protect)
+        assert manager.renew().ok
+        assert not path.exists()
+        assert manager.get_upload_token("7") == OTHER_TOKEN
+
+    def test_server_error_text_is_not_logged(self, tmp_path, logger, monkeypatch):
+        secret = "db password for ada@example.com failed"
+
+        def handler(url, data, kwargs):
+            return FakeResponse(500, {"error": secret})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        assert manager.issue("ada", PASSWORD).error == secret
+        assert secret not in logger.text
+        assert "ada@example.com" not in logger.text
+        assert "error=other" in logger.text
+        assert "status=500" in logger.text
+
+    def test_migration_verifies_before_deleting_legacy(self, tmp_path, monkeypatch):
+        _use_xor_dpapi(monkeypatch)
+        _write_legacy(tmp_path, "ada@example.com", PASSWORD)
+        real_open = open
+        reads = {"n": 0}
+
+        def guarded(path, mode="r", *args, **kwargs):
+            name = str(path)
+            if name.endswith(constants.DPAPI_CREDENTIALS_FILE) and "r" in mode:
+                reads["n"] += 1
+                raise PermissionError("locked")
+            return real_open(path, mode, *args, **kwargs)
+
+        monkeypatch.setattr("builtins.open", guarded)
+        manager = security.SecurityManager(base_dir=str(tmp_path))
+        loaded = manager.load_credentials()
+        assert loaded["password"] == PASSWORD
+        assert (tmp_path / constants.KEY_FILE).exists()
+        assert (tmp_path / constants.DATA_FILE).exists()
+        assert (tmp_path / constants.DPAPI_CREDENTIALS_FILE).exists()
+        assert reads["n"] >= 1
+
+    def test_definite_decrypt_failure_deletes_only_the_dpapi_file(self, tmp_path, monkeypatch):
+        _use_xor_dpapi(monkeypatch)
+        manager = security.SecurityManager(base_dir=str(tmp_path))
+        assert manager.save_credentials("ada@example.com", PASSWORD) is True
+        path = tmp_path / constants.DPAPI_CREDENTIALS_FILE
+        assert path.exists()
+
+        def broken(data):
+            raise dpapi.DpapiError("bad blob")
+
+        monkeypatch.setattr(dpapi, "unprotect_status", broken)
+        assert manager.load_credentials() is None
+        assert not path.exists()
+
+    def test_retry_after_http_date(self, tmp_path, logger, monkeypatch):
+        from email.utils import formatdate
+
+        clock = freeze_desk_clock(monkeypatch)
+        when = formatdate(clock["now"] + 30, usegmt=True)
+
+        def handler(url, data, kwargs):
+            return FakeResponse(429, {"error": "rate_limited"}, headers={"Retry-After": when})
+
+        route(monkeypatch, handler)
+        manager = make_manager(tmp_path, logger)
+        result = manager.issue("ada", PASSWORD)
+        assert result.error == "rate_limited"
+        assert abs(result.retry_after - 30) < 1.5
+
+    def test_entropy_is_used_for_new_blobs_and_legacy_blobs_still_open(self, monkeypatch):
+        calls = []
+
+        def fake_unprotect(data, entropy):
+            calls.append(entropy)
+            if entropy is not None:
+                raise dpapi.DpapiError("no entropy on this blob")
+            return b"plain"
+
+        def fake_protect(data, entropy):
+            calls.append(("protect", entropy))
+            return b"cipher"
+
+        monkeypatch.setattr(dpapi, "is_available", lambda: True)
+        monkeypatch.setattr(dpapi, "_unprotect_windows", fake_unprotect)
+        monkeypatch.setattr(dpapi, "_protect_windows", fake_protect)
+        plain, legacy = dpapi.unprotect_status(b"blob")
+        assert plain == b"plain"
+        assert legacy is True
+        assert dpapi.protect(b"x") == b"cipher"
+        assert calls[0] == dpapi.APP_ENTROPY
+        assert calls[1] is None
+        assert calls[2] == ("protect", dpapi.APP_ENTROPY)
+
+    def test_413_too_large_retries_a_smaller_jpeg_and_400_does_not(self, tmp_path, logger, monkeypatch):
+        pytest.importorskip("PIL")
+        from PIL import Image
+
+        image = _noise_image(80, 60, seed=3)
+        png_b64 = _png_b64(image)
+        posted = []
+
+        def handler(url, data, kwargs):
+            posted.append(dict(data))
+            if len(posted) == 1:
+                return FakeResponse(413, {"error": "too_large"})
+            return FakeResponse(200, {})
+
+        route(monkeypatch, handler)
+        manager = ScreenshotManager(logger=logger, token_manager=self_manager(tmp_path, logger))
+        assert manager.upload("42", base64_data=png_b64) is True
+        assert len(posted) == 2
+        assert posted[0]["format"] == "PNG"
+        assert posted[1]["format"] == "JPEG"
+        assert len(posted[1]["file"]) < len(posted[0]["file"])
+        decoded = Image.open(BytesIO(base64.b64decode(posted[1]["file"])))
+        assert decoded.size == image.size
+
+        posted.clear()
+
+        def reject_400(url, data, kwargs):
+            posted.append(dict(data))
+            return FakeResponse(400, {"error": "too_large"})
+
+        route(monkeypatch, reject_400)
+        assert manager.upload("42", base64_data=png_b64) is False
+        assert len(posted) == 1
+        assert posted[0]["format"] == "PNG"
+
+        posted.clear()
+
+        def reject_plain_400(url, data, kwargs):
+            posted.append(dict(data))
+            return FakeResponse(400, {"error": "bad_request"})
+
+        route(monkeypatch, reject_plain_400)
+        assert manager.upload("42", base64_data=png_b64) is False
+        assert len(posted) == 1
+
+    def test_downscale_gives_up_and_still_sends(self, tmp_path, logger, monkeypatch):
+        pytest.importorskip("PIL")
+        image = _noise_image(64, 48, seed=4)
+        png_b64 = _png_b64(image)
+        monkeypatch.setattr(screenshot, "MAX_UPLOAD_BASE64_CHARS", 1)
+        monkeypatch.setattr(screenshot, "MAX_DOWNSCALE_STEPS", 4)
+        posted = _capture_upload(monkeypatch)
+        manager = ScreenshotManager(logger=logger, token_manager=self_manager(tmp_path, logger))
+        assert manager.upload("42", base64_data=png_b64) is True
+        assert posted[0]["format"] == "JPEG"
+        assert len(posted[0]["file"]) > 1
+        assert "smallest" in logger.text
+
+
+def self_manager(tmp_path, logger):
+    return make_manager(tmp_path, logger)
 
 
 def _write_legacy(directory: Path, email: str, password: str) -> None:

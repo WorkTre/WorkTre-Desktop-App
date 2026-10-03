@@ -664,8 +664,7 @@ class WorkTreApp:
     def _issue_desk_token_async(self, username: str, password: str, employee_id):
         try:
             manager = self._desk_token_manager()
-            if employee_id:
-                manager.set_employee_id(employee_id)
+            manager.set_session(employee_id, username)
             manager.issue_async(
                 username,
                 password,

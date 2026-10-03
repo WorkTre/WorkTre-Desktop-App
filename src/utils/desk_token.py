@@ -39,8 +39,50 @@ _NO_FAILURE_BACKOFF = frozenset({
     "no_token",
     "superseded",
     "backoff",
+    "employee_mismatch",
+})
+_LOG_ERROR_CODES = frozenset({
+    "invalid_credentials",
+    "rate_limited",
+    "bad_request",
+    "token_expired",
+    "token_invalid",
+    "reauth_required",
 })
 _LOGGER_NAME = "worktre.desk_token"
+
+
+def _log_error_code(error) -> str:
+    """Log a fixed code. Anything else, including server prose, is ``other``."""
+    if error in _LOG_ERROR_CODES:
+        return error
+    return "other"
+
+
+def _employee_ids_equal(left, right) -> bool:
+    """Compare employee ids as integers. Non-numeric ids never match."""
+    if left is None or right is None:
+        return False
+    try:
+        return int(str(left).strip()) == int(str(right).strip())
+    except (TypeError, ValueError):
+        return False
+
+
+def _normalize_local_expiry(record):
+    """Scheduling uses issued_at + ttl, not the server's absolute expires_at."""
+    if not isinstance(record, dict):
+        return record
+    record = dict(record)
+    issued = record.get("issued_at")
+    ttl = record.get("ttl_seconds")
+    if issued is None or ttl is None:
+        return record
+    try:
+        record["expires_at_epoch"] = float(issued) + float(ttl)
+    except (TypeError, ValueError):
+        return record
+    return record
 
 
 @dataclass
@@ -108,37 +150,61 @@ def _record_from_body(body: Dict[str, Any], now: Optional[float] = None) -> Opti
     if not isinstance(token, str) or not token:
         return None
     now = time.time() if now is None else now
-    expires = _to_epoch(body.get("expires_at"))
-    if expires is None:
-        try:
-            expires = now + float(body.get("ttl_seconds"))
-        except (TypeError, ValueError):
-            expires = now + float(constants.DAY)
+    try:
+        ttl = float(body.get("ttl_seconds"))
+    except (TypeError, ValueError):
+        ttl = float(constants.DAY)
+    if ttl < 0:
+        ttl = float(constants.DAY)
+    server_expires = _to_epoch(body.get("expires_at"))
+    server_chain = _to_epoch(body.get("chain_expires_at"))
+    local_chain = None
+    if server_expires is not None and server_chain is not None:
+        local_chain = now + (server_chain - (server_expires - ttl))
     employee = body.get("employee_id")
     return {
         "token": token,
         "employee_id": "" if employee is None else str(employee),
+        "issued_at": now,
+        "ttl_seconds": ttl,
         "expires_at": body.get("expires_at"),
-        "expires_at_epoch": expires,
+        "expires_at_epoch": now + ttl,
         "chain_expires_at": body.get("chain_expires_at"),
-        "chain_expires_at_epoch": _to_epoch(body.get("chain_expires_at")),
+        "chain_expires_at_epoch": local_chain,
     }
 
 
 def _retry_after_seconds(body: Any, response) -> float:
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+
     raw = None
     if isinstance(body, dict) and body.get("retry_after") is not None:
         raw = body.get("retry_after")
     elif response is not None:
         headers = getattr(response, "headers", {}) or {}
         raw = headers.get("Retry-After")
+    if raw is None or raw == "":
+        return 60.0
     try:
         seconds = float(raw)
     except (TypeError, ValueError):
-        seconds = 60.0
-    if seconds < 0:
-        seconds = 0.0
-    return seconds
+        seconds = None
+    if seconds is not None:
+        if seconds < 0:
+            return 0.0
+        return seconds
+    if isinstance(raw, str):
+        try:
+            when = parsedate_to_datetime(raw.strip())
+        except (TypeError, ValueError, IndexError, OverflowError):
+            return 60.0
+        if when is None:
+            return 60.0
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, when.timestamp() - time.time())
+    return 60.0
 
 
 def _assert_url_has_no_secrets(url: str) -> None:
@@ -185,19 +251,35 @@ class TokenStore:
 
     def load(self) -> Optional[dict]:
         if not dpapi.is_available():
-            return dict(self._memory) if self._memory else None
+            memory = _normalize_local_expiry(self._memory) if self._memory else None
+            self._memory = memory
+            return dict(memory) if memory else None
         if not os.path.exists(self.path):
-            return dict(self._memory) if self._memory else None
+            memory = _normalize_local_expiry(self._memory) if self._memory else None
+            self._memory = memory
+            return dict(memory) if memory else None
         try:
             with open(self.path, "rb") as handle:
                 blob = handle.read()
-            payload = json.loads(dpapi.unprotect(blob).decode("utf-8"))
+            plain, legacy = dpapi.unprotect_status(blob)
+            payload = json.loads(plain.decode("utf-8"))
         except Exception:
             return dict(self._memory) if self._memory else None
         if not isinstance(payload, dict):
             return None
-        self._memory = payload
-        return dict(payload)
+        self._memory = _normalize_local_expiry(payload)
+        if legacy:
+            self.save(self._memory)
+        return dict(self._memory)
+
+    def drop_persisted(self) -> None:
+        """Delete the on-disk token and keep the in-memory copy."""
+        for path in (self.path, self.path + ".tmp"):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
 
     def persisted(self) -> bool:
         return os.path.exists(self.path)
@@ -231,6 +313,7 @@ class TokenManager:
         self._computer_name = computer_name
         self._app_version = app_version
         self._lock = threading.RLock()
+        self._mutation_lock = threading.Lock()
         self._maintain_gate = threading.Lock()
         self._record: Optional[dict] = None
         self._generation = 0
@@ -238,6 +321,9 @@ class TokenManager:
         self._failure_blocked_until = 0.0
         self._failure_backoff_seconds = 0.0
         self._employee_id: Optional[str] = None
+        self._signed_in_username: Optional[str] = None
+        self._issue_inflight = False
+        self._inflight_employee_id: Optional[str] = None
         self._credentials_rejected = False
         self._reauth_notice_sent = False
 
@@ -247,6 +333,14 @@ class TokenManager:
     def set_employee_id(self, employee_id) -> None:
         with self._lock:
             self._employee_id = None if employee_id is None else str(employee_id)
+
+    def set_session(self, employee_id, username=None) -> None:
+        """Bind later token calls to the signed-in employee and username."""
+        with self._lock:
+            if employee_id not in (None, ""):
+                self._employee_id = str(employee_id)
+            if username is not None:
+                self._signed_in_username = str(username).strip()
 
     def set_app_version(self, version) -> None:
         self._app_version = None if version is None else str(version)
@@ -265,21 +359,21 @@ class TokenManager:
                 "chain_expires_at_epoch": record.get("chain_expires_at_epoch"),
             }
 
-    def get_upload_token(self) -> Optional[str]:
-        """Current token for a screenshot upload, or None."""
+    def get_upload_token(self, user_id=None) -> Optional[str]:
+        """Token for this upload, only when its employee id matches ``user_id``."""
         try:
             with self._lock:
-                current = self._usable_token_locked(self._record)
+                current = self._usable_token_locked(self._record, user_id)
                 if current:
                     return current
             loaded = self._store.load()
             if not loaded:
                 return None
             with self._lock:
-                current = self._usable_token_locked(self._record)
+                current = self._usable_token_locked(self._record, user_id)
                 if current:
                     return current
-                if not self._usable_token_locked(loaded):
+                if not self._usable_token_locked(loaded, user_id):
                     return None
                 self._record = loaded
                 return loaded.get("token")
@@ -300,6 +394,36 @@ class TokenManager:
         if not username or not password:
             return TokenResult(ok=False, error="bad_request")
         with self._lock:
+            seen = (self._record or {}).get("token")
+        with self._mutation_lock:
+            with self._lock:
+                self._issue_inflight = True
+                self._inflight_employee_id = self._employee_id
+            try:
+                return self._issue_holding(
+                    username,
+                    password,
+                    computer_name,
+                    app_version,
+                    reset_rejection,
+                    ignore_backoff,
+                    seen,
+                )
+            finally:
+                with self._lock:
+                    self._issue_inflight = False
+
+    def _issue_holding(
+        self,
+        username,
+        password,
+        computer_name,
+        app_version,
+        reset_rejection,
+        ignore_backoff,
+        seen,
+    ) -> TokenResult:
+        with self._lock:
             if reset_rejection:
                 self._credentials_rejected = False
                 self._reauth_notice_sent = False
@@ -316,6 +440,13 @@ class TokenManager:
                     error="backoff",
                     retry_after=self._failure_remaining_locked(),
                 )
+            current = (self._record or {}).get("token")
+            if current and current != seen and self._usable_token_locked(self._record):
+                return TokenResult(
+                    ok=True,
+                    token=current,
+                    employee_id=(self._record or {}).get("employee_id"),
+                )
             generation = self._generation
         fields = {"username": username, "password": password}
         computer = computer_name if computer_name is not None else self._computer_name_value()
@@ -330,6 +461,12 @@ class TokenManager:
     def renew(self) -> TokenResult:
         """POST /desktoken/renew. The server cancels the previous token."""
         with self._lock:
+            seen = (self._record or {}).get("token")
+        with self._mutation_lock:
+            return self._renew_holding(seen)
+
+    def _renew_holding(self, seen) -> TokenResult:
+        with self._lock:
             if self._rate_limited_locked():
                 return TokenResult(
                     ok=False,
@@ -342,27 +479,42 @@ class TokenManager:
                     error="backoff",
                     retry_after=self._failure_remaining_locked(),
                 )
-            token = (self._record or {}).get("token")
+            current = (self._record or {}).get("token")
             generation = self._generation
-        if not token:
+            employee_id = (self._record or {}).get("employee_id")
+        if seen and current and current != seen:
+            return TokenResult(ok=True, token=current, employee_id=employee_id)
+        if not current:
             return TokenResult(ok=False, error="no_token")
-        result, record = self._call("renew", constants.DESK_TOKEN_RENEW_URL, {"token": token})
+        result, record = self._call("renew", constants.DESK_TOKEN_RENEW_URL, {"token": current})
         return self._finish_mutation(result, record, generation, invalid_sets_rejection=False)
 
     def revoke(self) -> TokenResult:
-        """POST /desktoken/revoke and delete the stored token. Best effort."""
+        """Revoke the stored token on the server, then delete the local copy."""
         with self._lock:
             limited = self._rate_limited_locked()
             retry_after = self._retry_remaining_locked()
             token = (self._record or {}).get("token")
-            self._clear_locked()
+            if not token:
+                try:
+                    loaded = self._store.load()
+                except Exception:
+                    loaded = None
+                if loaded and loaded.get("token"):
+                    token = loaded.get("token")
+                    self._record = loaded
         if not token:
+            with self._lock:
+                self._clear_locked()
             return TokenResult(ok=True)
         if limited:
             return TokenResult(ok=False, error="rate_limited", retry_after=retry_after)
         result, _record = self._call("revoke", constants.DESK_TOKEN_REVOKE_URL, {"token": token})
-        if result.error == "rate_limited":
-            with self._lock:
+        with self._lock:
+            current = (self._record or {}).get("token")
+            if current in (None, token):
+                self._clear_locked()
+            if result.error == "rate_limited":
                 self._set_rate_limit_locked(result.retry_after or 60)
         return result
 
@@ -402,10 +554,12 @@ class TokenManager:
         """
         Synchronous crash-login policy.
 
-        Returns ``issued``, ``issue_failed``, ``restored``, or ``none``.
+        Returns ``issued``, ``issue_failed``, ``restored``, ``skipped``, or ``none``.
         """
         self.set_employee_id(employee_id)
-        saved = self._saved_credentials()
+        if self._recent_or_inflight(employee_id):
+            return "skipped"
+        saved = self._saved_credentials_for_session()
         if saved:
             result = self.issue(saved[0], saved[1])
             return "issued" if result.ok else "issue_failed"
@@ -422,7 +576,8 @@ class TokenManager:
             return False
         if not record or not record.get("token"):
             return False
-        if str(record.get("employee_id")) != str(employee_id):
+        record = _normalize_local_expiry(record)
+        if not _employee_ids_equal(record.get("employee_id"), employee_id):
             self._log("stored desk token belongs to a different employee")
             return False
         if self._epoch_expired(record.get("expires_at_epoch")):
@@ -431,7 +586,7 @@ class TokenManager:
         with self._lock:
             self._record = record
             self._employee_id = str(employee_id)
-        self._log("reused stored desk token")
+        self._log("reused stored desk token for employee %s" % record.get("employee_id"))
         return True
 
     def maintain(self) -> TokenResult:
@@ -449,56 +604,56 @@ class TokenManager:
                 return self._issue_saved_quietly()
             if not self._within_renew_window(record):
                 return TokenResult(ok=True)
+            sent = record.get("token")
             renewed = self.renew()
             if renewed.ok or renewed.error == "rate_limited":
                 return renewed
             if renewed.error in _AUTH_REFRESH_ERRORS:
-                return self._issue_saved_or_notify(renewed.error)
+                return self._issue_saved_or_notify(renewed.error, sent)
             return renewed
         except Exception:
             self._log("token maintenance failed", "error")
             return TokenResult(ok=False, error="error")
 
-    def recover_after_rejected_token(self) -> Optional[str]:
+    def recover_after_rejected_token(self, user_id=None) -> Optional[str]:
         """
         Upload helper: renew once, otherwise issue with the saved password.
 
-        Returns a fresh token, or None so the caller can upload without one.
+        Returns a fresh token for ``user_id``, or None so the upload stays tokenless.
         """
         try:
             with self._lock:
                 if self._rate_limited_locked() or self._failure_limited_locked():
                     return None
-                has_token = bool(self._record and self._record.get("token"))
+                sent = (self._record or {}).get("token")
+                has_token = bool(sent)
             renewed_error = None
             if has_token:
                 renewed = self.renew()
-                if renewed.ok and renewed.token:
+                if renewed.ok and renewed.token and self._token_matches_upload(renewed.token, user_id):
                     return renewed.token
                 if renewed.error == "rate_limited" or renewed.error == "backoff":
                     return None
                 if _arms_failure_backoff(renewed):
                     return None
                 renewed_error = renewed.error
-            saved = None if self._credentials_rejected else self._saved_credentials()
+            saved = None if self._credentials_rejected else self._saved_credentials_for_session()
             if saved:
                 issued = self.issue(saved[0], saved[1])
-                if issued.ok and issued.token:
+                if issued.ok and issued.token and self._token_matches_upload(issued.token, user_id):
                     return issued.token
                 if issued.error == "rate_limited":
                     return None
-                if renewed_error == "reauth_required" or issued.error in (
+                if renewed_error in _AUTH_REFRESH_ERRORS or issued.error in (
                     "invalid_credentials",
                     "reauth_required",
+                    "token_expired",
+                    "token_invalid",
                 ):
-                    self._notify_reauth_once()
-                    self.clear_local()
+                    self._reject_current_token(sent, renewed_error or issued.error)
                 return None
-            if renewed_error == "reauth_required":
-                self._notify_reauth_once()
-                self.clear_local()
-            elif renewed_error in ("token_expired", "token_invalid"):
-                self.clear_local()
+            if renewed_error in _AUTH_REFRESH_ERRORS:
+                self._reject_current_token(sent, renewed_error)
             return None
         except Exception:
             self._log("token recovery failed", "error")
@@ -558,27 +713,74 @@ class TokenManager:
             rejected = self._credentials_rejected
         if rejected:
             return TokenResult(ok=False, error="invalid_credentials")
-        saved = self._saved_credentials()
+        saved = self._saved_credentials_for_session()
         if not saved:
             return TokenResult(ok=False, error="no_token")
         return self.issue(saved[0], saved[1])
 
-    def _issue_saved_or_notify(self, reason: str) -> TokenResult:
-        saved = None if self._credentials_rejected else self._saved_credentials()
+    def _issue_saved_or_notify(self, reason: str, sent_token=None) -> TokenResult:
+        saved = None if self._credentials_rejected else self._saved_credentials_for_session()
         if saved:
             issued = self.issue(saved[0], saved[1])
             if issued.ok or issued.error == "rate_limited":
                 return issued
-            if reason == "reauth_required" or issued.error in ("invalid_credentials", "reauth_required"):
-                self._notify_reauth_once()
-                self.clear_local()
+            if reason in _AUTH_REFRESH_ERRORS or issued.error in (
+                "invalid_credentials",
+                "reauth_required",
+                "token_expired",
+                "token_invalid",
+            ):
+                self._reject_current_token(sent_token, reason)
             return issued
-        if reason == "reauth_required":
-            self._notify_reauth_once()
-            self.clear_local()
-        elif reason in ("token_expired", "token_invalid"):
-            self.clear_local()
+        if reason in _AUTH_REFRESH_ERRORS:
+            self._reject_current_token(sent_token, reason)
         return TokenResult(ok=False, error=reason)
+
+    def _reject_current_token(self, sent_token, reason: str) -> None:
+        """Drop the rejected token unless a newer one is already stored, then notice once."""
+        with self._lock:
+            current = (self._record or {}).get("token")
+            if sent_token and current and current != sent_token:
+                return
+            self._clear_locked()
+        if reason in _AUTH_REFRESH_ERRORS:
+            self._notify_reauth_once()
+
+    def _token_matches_upload(self, token: str, user_id) -> bool:
+        with self._lock:
+            record = self._record or {}
+            if record.get("token") != token:
+                return user_id is None
+            if user_id is None:
+                return True
+            return _employee_ids_equal(record.get("employee_id"), user_id)
+
+    def _recent_or_inflight(self, employee_id) -> bool:
+        with self._lock:
+            if self._issue_inflight and _employee_ids_equal(self._inflight_employee_id, employee_id):
+                return True
+            record = dict(self._record) if self._record else None
+        if not record or not _employee_ids_equal(record.get("employee_id"), employee_id):
+            return False
+        issued = record.get("issued_at")
+        if issued is None:
+            return False
+        try:
+            age = time.time() - float(issued)
+        except (TypeError, ValueError):
+            return False
+        return age <= float(constants.DESK_TOKEN_RECENT_ISSUE)
+
+    def _saved_credentials_for_session(self):
+        saved = self._saved_credentials()
+        if not saved:
+            return None
+        email, password = saved
+        with self._lock:
+            current = (self._signed_in_username or "").strip().lower()
+        if not current or email.strip().lower() != current:
+            return None
+        return email, password
 
     def _call(self, action: str, url: str, fields: Dict[str, str]) -> Tuple[TokenResult, Optional[dict]]:
         try:
@@ -591,7 +793,10 @@ class TokenManager:
             return TokenResult(ok=False, error="network"), None
         result, record = _interpret(response, action)
         level = "debug" if result.ok else "warning"
-        self._log(f"{action} status={result.status_code} error={result.error or '-'}", level)
+        self._log(
+            f"{action} status={result.status_code} error={_log_error_code(result.error)}",
+            level,
+        )
         return result, record
 
     def _finish_mutation(
@@ -601,6 +806,7 @@ class TokenManager:
         generation: int,
         invalid_sets_rejection: bool,
     ) -> TokenResult:
+        late_token = None
         with self._lock:
             if result.error == "rate_limited":
                 self._set_rate_limit_locked(result.retry_after or 60)
@@ -609,31 +815,57 @@ class TokenManager:
             if success:
                 self._reset_failure_backoff_locked()
             if self._generation != generation:
-                return TokenResult(ok=False, error="superseded", status_code=result.status_code)
-            if success:
-                self._store_record_locked(record)
-                self._credentials_rejected = False
-                self._reauth_notice_sent = False
-                result.token = record.get("token")
-                result.employee_id = record.get("employee_id")
-                return result
-            if invalid_sets_rejection and result.error == "invalid_credentials":
-                self._credentials_rejected = True
-            if _arms_failure_backoff(result):
-                self._arm_failure_backoff_locked(result)
-            return result
+                if success:
+                    late = record.get("token")
+                    current = (self._record or {}).get("token")
+                    if late and late != current:
+                        late_token = late
+                outcome = TokenResult(ok=False, error="superseded", status_code=result.status_code)
+            elif success:
+                if not self._store_record_locked(record):
+                    outcome = TokenResult(
+                        ok=False,
+                        error="employee_mismatch",
+                        status_code=result.status_code,
+                    )
+                else:
+                    self._credentials_rejected = False
+                    self._reauth_notice_sent = False
+                    result.token = record.get("token")
+                    result.employee_id = record.get("employee_id")
+                    outcome = result
+            else:
+                if invalid_sets_rejection and result.error == "invalid_credentials":
+                    self._credentials_rejected = True
+                if _arms_failure_backoff(result):
+                    self._arm_failure_backoff_locked(result)
+                outcome = result
+        if late_token:
+            self._revoke_late_token(late_token)
+        return outcome
 
-    def _store_record_locked(self, record: dict) -> None:
-        self._record = dict(record)
-        if record.get("employee_id"):
-            self._employee_id = str(record["employee_id"])
+    def _revoke_late_token(self, token: str) -> None:
+        """Best-effort revoke of a token that lost the race with logout."""
+        try:
+            self._call("revoke", constants.DESK_TOKEN_REVOKE_URL, {"token": token})
+        except Exception:
+            self._log("late token revoke failed", "warning")
+
+    def _store_record_locked(self, record: dict) -> bool:
+        if self._employee_id and not _employee_ids_equal(record.get("employee_id"), self._employee_id):
+            self._log("desk token employee does not match the signed-in employee")
+            return False
+        normalized = _normalize_local_expiry(record)
+        self._record = dict(normalized)
         saved = self._store.save(self._record)
         if saved:
-            self._log("desk token stored")
+            self._log("desk token stored for employee %s" % (self._record.get("employee_id") or "-"))
         elif dpapi.is_available():
-            self._log("desk token kept in memory; disk save failed", "warning")
+            self._store.drop_persisted()
+            self._log("desk token kept in memory; previous disk token removed", "warning")
         else:
             self._log("desk token kept in memory; DPAPI unavailable")
+        return True
 
     def _clear_locked(self) -> None:
         # Backoff stays. Dropping the token must not make the next keep-alive retry immediately.
@@ -641,13 +873,16 @@ class TokenManager:
         self._generation += 1
         self._store.clear()
 
-    def _usable_token_locked(self, record: Optional[dict]) -> Optional[str]:
+    def _usable_token_locked(self, record: Optional[dict], user_id=None) -> Optional[str]:
         if not record or not record.get("token"):
             return None
+        record = _normalize_local_expiry(record)
         if self._epoch_expired(record.get("expires_at_epoch")):
             return None
         employee = record.get("employee_id")
-        if self._employee_id and employee and str(employee) != str(self._employee_id):
+        if self._employee_id and not _employee_ids_equal(employee, self._employee_id):
+            return None
+        if user_id is not None and not _employee_ids_equal(employee, user_id):
             return None
         return record.get("token")
 
@@ -703,7 +938,10 @@ class TokenManager:
             delay = min(self._failure_backoff_seconds * 2, maximum)
         self._failure_backoff_seconds = delay
         self._failure_blocked_until = time.time() + delay
-        self._log(f"backing off {int(delay)}s error={result.error or '-'}", "warning")
+        self._log(
+            f"backing off {int(delay)}s error={_log_error_code(result.error)}",
+            "warning",
+        )
 
     def _saved_credentials(self) -> Optional[Tuple[str, str]]:
         try:
