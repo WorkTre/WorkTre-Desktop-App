@@ -636,7 +636,7 @@ class WorkTreApp:
 
     def _desk_token_manager(self):
         """Shared token manager. Failures here must not affect attendance."""
-        from .utils.desk_token import get_token_manager
+        from src.utils.desk_token import get_token_manager
         manager = get_token_manager(self.logger)
         manager.set_reauth_handler(self._notify_desk_reauth)
         if self.app_version:
@@ -877,7 +877,7 @@ class WorkTreApp:
 
                         if not result or (not result.get("status") and not result.get("skipped")):
                             try:
-                                from .utils.activity_queue import get_activity_queue
+                                from src.utils.activity_queue import get_activity_queue
                                 get_activity_queue(APP_NAME, self.logger).enqueue(
                                     self.state.current_user, "False", idle_start, idle_end
                                 )
@@ -904,7 +904,7 @@ class WorkTreApp:
         if not self.api_client or not self.state.is_logged_in:
             return
         try:
-            from .utils.activity_queue import get_activity_queue
+            from src.utils.activity_queue import get_activity_queue
             queue = get_activity_queue(APP_NAME, self.logger)
 
             def _send(user_id, break_flag, idle_start, idle_end):
@@ -1563,7 +1563,7 @@ class JSApi:
                     idle_end
                 )
                 if not result or (not result.get("status") and not result.get("skipped")):
-                    from .utils.activity_queue import get_activity_queue
+                    from src.utils.activity_queue import get_activity_queue
                     get_activity_queue(APP_NAME, self._app.logger).enqueue(
                         self._app.state.current_user, break_flag, idle_start, idle_end
                     )
@@ -1624,9 +1624,9 @@ class JSApi:
     def get_privacy_settings(self) -> Dict[str, Any]:
         """Return local privacy settings + what WorkTre App tracks."""
         try:
-            from .utils.preferences import get_preferences
-            from .utils.activity_queue import get_activity_queue
-            from .config import settings as app_settings
+            from src.utils.preferences import get_preferences
+            from src.utils.activity_queue import get_activity_queue
+            from src.config import settings as app_settings
 
             prefs = get_preferences(APP_NAME)
             user_info = self._app.state.user_info or {}
@@ -1683,7 +1683,7 @@ class JSApi:
     def save_privacy_settings(self, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
         """Save local privacy preferences (blur, consent, etc.)."""
         try:
-            from .utils.preferences import save_preferences, get_preferences
+            from src.utils.preferences import save_preferences, get_preferences
             if preferences is None:
                 preferences = {}
             ok = save_preferences(preferences, APP_NAME)
@@ -1695,7 +1695,7 @@ class JSApi:
     def acknowledge_trust_notice(self, screenshot_consent: bool = False) -> Dict[str, Any]:
         """Record monitoring / screenshot consent from the trust notice."""
         try:
-            from .utils.preferences import save_preferences, get_preferences
+            from src.utils.preferences import save_preferences, get_preferences
             payload = {"monitoring_notice_acked": True}
             if screenshot_consent:
                 payload["screenshot_consent_acked"] = True

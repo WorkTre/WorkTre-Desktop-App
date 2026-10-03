@@ -29,6 +29,8 @@ a = Analysis(
         'src.utils.security',
         'src.utils.dpapi',
         'src.utils.desk_token',
+        'src.utils.activity_queue',
+        'src.utils.preferences',
         'src.utils.screenshot',
         'src.utils.update',
         'src.utils.updater',
