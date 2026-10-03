@@ -142,9 +142,9 @@ class SecurityManager:
             return None
 
     def save_credentials(self, email: str, password: str) -> bool:
-        """Save credentials with DPAPI. The password is the plain typed password."""
+        """Save credentials with DPAPI. Empty values clear the saved password."""
         if not email or not password:
-            return False
+            return self.clear_credentials()
         if not self._write_dpapi_credentials({"email": email, "password": password}):
             return False
         self._delete_legacy_files()
@@ -204,41 +204,85 @@ class SecurityManager:
     def _write_dpapi_credentials(self, credentials: Dict[str, str]) -> bool:
         if not dpapi.is_available():
             return False
+        expected = {
+            "email": credentials.get("email") or "",
+            "password": credentials.get("password") or "",
+        }
         try:
-            payload = json.dumps({
-                "email": credentials.get("email") or "",
-                "password": credentials.get("password") or "",
-            }).encode("utf-8")
+            payload = json.dumps(expected).encode("utf-8")
             blob = dpapi.protect(payload)
             ensure_directory(os.path.dirname(self._dpapi_path))
             temporary = self._dpapi_path + ".tmp"
             with open(temporary, "wb") as handle:
                 handle.write(blob)
             os.replace(temporary, self._dpapi_path)
-            return True
         except Exception:
             print("Error saving credentials")
             self._delete_file(self._dpapi_path + ".tmp")
             return False
+        verified = self._read_dpapi_credentials(delete_on_definite_failure=False)
+        if not verified:
+            return False
+        if verified.get("email") != expected["email"] or verified.get("password") != expected["password"]:
+            return False
+        return True
 
-    def _read_dpapi_credentials(self) -> Optional[Dict[str, str]]:
+    def _read_dpapi_credentials(self, delete_on_definite_failure: bool = True) -> Optional[Dict[str, str]]:
         if not os.path.exists(self._dpapi_path) or not dpapi.is_available():
             return None
         try:
             with open(self._dpapi_path, "rb") as handle:
                 blob = handle.read()
-            payload = json.loads(dpapi.unprotect(blob).decode("utf-8"))
-            password = payload.get("password") or ""
-            if not password:
-                raise ValueError("missing password")
-            return {
-                "email": payload.get("email") or "",
-                "password": password,
-            }
-        except Exception:
-            print("Could not decrypt saved credentials")
-            self._delete_file(self._dpapi_path)
+        except OSError:
+            print("Could not read saved credentials")
             return None
+        try:
+            plain, legacy = dpapi.unprotect_status(blob)
+            payload = json.loads(plain.decode("utf-8"))
+        except OSError:
+            print("Could not read saved credentials")
+            return None
+        except (dpapi.DpapiError, dpapi.DpapiUnavailable, json.JSONDecodeError,
+                UnicodeError, ValueError, TypeError):
+            if delete_on_definite_failure:
+                print("Could not decrypt saved credentials")
+                self._delete_file(self._dpapi_path)
+            return None
+        except Exception:
+            print("Could not read saved credentials")
+            return None
+        if not isinstance(payload, dict):
+            if delete_on_definite_failure:
+                self._delete_file(self._dpapi_path)
+            return None
+        password = payload.get("password") or ""
+        if not password:
+            if delete_on_definite_failure:
+                print("Could not decrypt saved credentials")
+                self._delete_file(self._dpapi_path)
+            return None
+        loaded = {
+            "email": payload.get("email") or "",
+            "password": password,
+        }
+        if legacy:
+            self._rewrite_with_entropy(loaded)
+        return loaded
+
+    def _rewrite_with_entropy(self, credentials: Dict[str, str]) -> None:
+        """Re-protect an entropy-less blob. A failed rewrite leaves the file in place."""
+        try:
+            payload = json.dumps({
+                "email": credentials.get("email") or "",
+                "password": credentials.get("password") or "",
+            }).encode("utf-8")
+            blob = dpapi.protect(payload)
+            temporary = self._dpapi_path + ".tmp"
+            with open(temporary, "wb") as handle:
+                handle.write(blob)
+            os.replace(temporary, self._dpapi_path)
+        except Exception:
+            self._delete_file(self._dpapi_path + ".tmp")
 
     def _take_legacy_credentials(self) -> Optional[Dict[str, str]]:
         """
