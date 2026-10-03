@@ -1367,12 +1367,94 @@ class TestQaFixes:
         assert calls[1] is None
         assert calls[2] == ("protect", dpapi.APP_ENTROPY)
 
-    def test_413_too_large_retries_a_smaller_jpeg_and_400_does_not(self, tmp_path, logger, monkeypatch):
+    def test_503_busy_honours_retry_after_without_backoff_or_notice(
+        self, tmp_path, logger, monkeypatch
+    ):
+        from email.utils import formatdate
+
+        clock = freeze_desk_clock(monkeypatch)
+        start = clock["now"]
+        notices = []
+        calls = []
+
+        def handler(url, data, kwargs):
+            calls.append(url)
+            if len(calls) == 1:
+                return FakeResponse(503, {"error": "busy"}, headers={"Retry-After": "45"})
+            if len(calls) == 2:
+                when = formatdate(clock["now"] + 20, usegmt=True)
+                return FakeResponse(503, {"error": "busy"}, headers={"Retry-After": when})
+            return FakeResponse(503, {"error": "busy"})
+
+        route(monkeypatch, handler)
+        manager = make_manager(
+            tmp_path, logger, loader=lambda: ("ada", PASSWORD), notices=notices
+        )
+        manager.set_session("7", "ada")
+
+        issued = manager.issue("ada", PASSWORD)
+        assert issued.error == "busy"
+        assert issued.status_code == 503
+        assert issued.retry_after == 45
+        assert manager.issue("ada", PASSWORD).error == "rate_limited"
+        assert calls == [constants.DESK_TOKEN_ISSUE_URL]
+        assert manager._failure_blocked_until == 0
+        assert manager._failure_backoff_seconds == 0
+        assert notices == []
+        assert "error=busy" in logger.text
+        assert "sign in" not in logger.text.lower()
+
+        clock["now"] = start + 45
+        again = manager.issue("ada", PASSWORD)
+        assert again.error == "busy"
+        assert abs(again.retry_after - 20) < 1.5
+        assert len(calls) == 2
+        clock["now"] = start + 45 + 19
+        assert manager.issue("ada", PASSWORD).error == "rate_limited"
+        assert len(calls) == 2
+
+        clock["now"] = start + 45 + 20
+        missing = manager.issue("ada", PASSWORD)
+        assert missing.error == "busy"
+        assert missing.retry_after == 30
+        assert len(calls) == 3
+        assert manager._failure_backoff_seconds == 0
+        assert notices == []
+
+        seed_token(manager, expires_in=30)
+        manager._record["expires_at_epoch"] = clock["now"] + 30
+        manager._blocked_until = 0
+
+        def renew_busy(url, data, kwargs):
+            calls.append(url)
+            assert "password" not in data
+            return FakeResponse(503, {"error": "busy"}, headers={"Retry-After": "12"})
+
+        route(monkeypatch, renew_busy)
+        renewed = manager.maintain()
+        assert renewed.error == "busy"
+        assert renewed.retry_after == 12
+        assert calls[-1] == constants.DESK_TOKEN_RENEW_URL
+        assert manager.maintain().error == "rate_limited"
+        assert calls.count(constants.DESK_TOKEN_RENEW_URL) == 1
+        assert constants.DESK_TOKEN_ISSUE_URL not in calls[3:]
+        assert notices == []
+        assert PASSWORD not in logger.text
+
+    def test_upload_guard_is_six_megabytes_and_size_reject_retries_under_three(
+        self, tmp_path, logger, monkeypatch
+    ):
         pytest.importorskip("PIL")
         from PIL import Image
 
+        assert screenshot.MAX_UPLOAD_BASE64_CHARS == 6 * 1024 * 1024
+        assert screenshot.SIZE_RETRY_BASE64_CHARS == 3 * 1024 * 1024
+
         image = _noise_image(80, 60, seed=3)
         png_b64 = _png_b64(image)
+        tiny = image.resize((8, 6))
+        tiny_len = len(_encode_jpeg_base64(tiny, JPEG_FALLBACK_QUALITY))
+        monkeypatch.setattr(screenshot, "SIZE_RETRY_BASE64_CHARS", tiny_len)
         posted = []
 
         def handler(url, data, kwargs):
@@ -1387,20 +1469,28 @@ class TestQaFixes:
         assert len(posted) == 2
         assert posted[0]["format"] == "PNG"
         assert posted[1]["format"] == "JPEG"
+        assert len(posted[1]["file"]) <= tiny_len
         assert len(posted[1]["file"]) < len(posted[0]["file"])
         decoded = Image.open(BytesIO(base64.b64decode(posted[1]["file"])))
-        assert decoded.size == image.size
+        assert decoded.size[0] < image.size[0]
+        assert decoded.size[1] < image.size[1]
+        assert png_b64 not in logger.text
 
-        posted.clear()
+        for code in ("too_large", "payload_too_large", "file_too_large"):
+            posted.clear()
 
-        def reject_400(url, data, kwargs):
-            posted.append(dict(data))
-            return FakeResponse(400, {"error": "too_large"})
+            def reject_size(url, data, kwargs, code=code):
+                posted.append(dict(data))
+                if len(posted) == 1:
+                    return FakeResponse(400, {"error": code})
+                return FakeResponse(200, {})
 
-        route(monkeypatch, reject_400)
-        assert manager.upload("42", base64_data=png_b64) is False
-        assert len(posted) == 1
-        assert posted[0]["format"] == "PNG"
+            route(monkeypatch, reject_size)
+            assert manager.upload("42", base64_data=png_b64) is True
+            assert len(posted) == 2
+            assert posted[0]["format"] == "PNG"
+            assert posted[1]["format"] == "JPEG"
+            assert len(posted[1]["file"]) <= tiny_len
 
         posted.clear()
 
@@ -1411,6 +1501,18 @@ class TestQaFixes:
         route(monkeypatch, reject_plain_400)
         assert manager.upload("42", base64_data=png_b64) is False
         assert len(posted) == 1
+        assert posted[0]["format"] == "PNG"
+
+        posted.clear()
+
+        def keep_rejecting(url, data, kwargs):
+            posted.append(dict(data))
+            return FakeResponse(413, {})
+
+        route(monkeypatch, keep_rejecting)
+        assert manager.upload("42", base64_data=png_b64) is False
+        assert len(posted) == 2
+        assert posted[1]["format"] == "JPEG"
 
     def test_downscale_gives_up_and_still_sends(self, tmp_path, logger, monkeypatch):
         pytest.importorskip("PIL")

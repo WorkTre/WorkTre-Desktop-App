@@ -76,7 +76,7 @@ Current installer version: **2.2.3** · Per-user install under `%LOCALAPPDATA%\W
 - Captures **all monitors**.
 - **Blur before upload** — Off / Light / Medium (default) / Strong.
 - Employee must **acknowledge screenshot consent** if the company turns screenshots on.
-- Uploaded to WorkTre (`ss_upload`) as a form-encoded body, with a desk token in that body when one is available. The token, username, and password are never placed in the URL. A capture whose base64 is over 12 MB is re-encoded as JPEG (quality 80) and downscaled until it fits. If a token cannot be issued or renewed, the upload still goes out without one and attendance keeps running.
+- Uploaded to WorkTre (`ss_upload`) as a form-encoded body, with a desk token in that body when one is available. The token, username, and password are never placed in the URL. A capture whose base64 is over 6 MB is re-encoded as JPEG (quality 80) and downscaled until it fits. If a token cannot be issued or renewed, the upload still goes out without one and attendance keeps running.
 - **App / URL tracking is not enabled** in the Desktop App.
 
 ### 2.6 Privacy and trust (employee-visible)

@@ -33,6 +33,7 @@ _AUTH_REFRESH_ERRORS = ("reauth_required", "token_expired", "token_invalid")
 _NO_FAILURE_BACKOFF = frozenset({
     "invalid_credentials",
     "rate_limited",
+    "busy",
     "reauth_required",
     "token_expired",
     "token_invalid",
@@ -41,9 +42,13 @@ _NO_FAILURE_BACKOFF = frozenset({
     "backoff",
     "employee_mismatch",
 })
+# 503 busy holds the same local window as a 429. It is not an outage backoff.
+_RETRY_HOLD_ERRORS = frozenset({"rate_limited", "busy"})
+_BUSY_RETRY_DEFAULT = 30.0
 _LOG_ERROR_CODES = frozenset({
     "invalid_credentials",
     "rate_limited",
+    "busy",
     "bad_request",
     "token_expired",
     "token_invalid",
@@ -174,7 +179,7 @@ def _record_from_body(body: Dict[str, Any], now: Optional[float] = None) -> Opti
     }
 
 
-def _retry_after_seconds(body: Any, response) -> float:
+def _retry_after_seconds(body: Any, response, default: float = 60.0) -> float:
     from datetime import timezone
     from email.utils import parsedate_to_datetime
 
@@ -185,7 +190,7 @@ def _retry_after_seconds(body: Any, response) -> float:
         headers = getattr(response, "headers", {}) or {}
         raw = headers.get("Retry-After")
     if raw is None or raw == "":
-        return 60.0
+        return default
     try:
         seconds = float(raw)
     except (TypeError, ValueError):
@@ -198,13 +203,13 @@ def _retry_after_seconds(body: Any, response) -> float:
         try:
             when = parsedate_to_datetime(raw.strip())
         except (TypeError, ValueError, IndexError, OverflowError):
-            return 60.0
+            return default
         if when is None:
-            return 60.0
+            return default
         if when.tzinfo is None:
             when = when.replace(tzinfo=timezone.utc)
         return max(0.0, when.timestamp() - time.time())
-    return 60.0
+    return default
 
 
 def _assert_url_has_no_secrets(url: str) -> None:
@@ -514,8 +519,8 @@ class TokenManager:
             current = (self._record or {}).get("token")
             if current in (None, token):
                 self._clear_locked()
-            if result.error == "rate_limited":
-                self._set_rate_limit_locked(result.retry_after or 60)
+            if result.error in _RETRY_HOLD_ERRORS:
+                self._remember_retry_locked(result)
         return result
 
     def revoke_async(self) -> None:
@@ -606,7 +611,7 @@ class TokenManager:
                 return TokenResult(ok=True)
             sent = record.get("token")
             renewed = self.renew()
-            if renewed.ok or renewed.error == "rate_limited":
+            if renewed.ok or renewed.error in _RETRY_HOLD_ERRORS:
                 return renewed
             if renewed.error in _AUTH_REFRESH_ERRORS:
                 return self._issue_saved_or_notify(renewed.error, sent)
@@ -632,7 +637,7 @@ class TokenManager:
                 renewed = self.renew()
                 if renewed.ok and renewed.token and self._token_matches_upload(renewed.token, user_id):
                     return renewed.token
-                if renewed.error == "rate_limited" or renewed.error == "backoff":
+                if renewed.error in _RETRY_HOLD_ERRORS or renewed.error == "backoff":
                     return None
                 if _arms_failure_backoff(renewed):
                     return None
@@ -642,7 +647,7 @@ class TokenManager:
                 issued = self.issue(saved[0], saved[1])
                 if issued.ok and issued.token and self._token_matches_upload(issued.token, user_id):
                     return issued.token
-                if issued.error == "rate_limited":
+                if issued.error in _RETRY_HOLD_ERRORS:
                     return None
                 if renewed_error in _AUTH_REFRESH_ERRORS or issued.error in (
                     "invalid_credentials",
@@ -722,7 +727,7 @@ class TokenManager:
         saved = None if self._credentials_rejected else self._saved_credentials_for_session()
         if saved:
             issued = self.issue(saved[0], saved[1])
-            if issued.ok or issued.error == "rate_limited":
+            if issued.ok or issued.error in _RETRY_HOLD_ERRORS:
                 return issued
             if reason in _AUTH_REFRESH_ERRORS or issued.error in (
                 "invalid_credentials",
@@ -808,8 +813,8 @@ class TokenManager:
     ) -> TokenResult:
         late_token = None
         with self._lock:
-            if result.error == "rate_limited":
-                self._set_rate_limit_locked(result.retry_after or 60)
+            if result.error in _RETRY_HOLD_ERRORS:
+                self._remember_retry_locked(result)
                 return result
             success = bool(result.ok and record)
             if success:
@@ -908,6 +913,14 @@ class TokenManager:
 
     def _retry_remaining_locked(self) -> float:
         return max(0.0, self._blocked_until - time.time())
+
+    def _remember_retry_locked(self, result: TokenResult) -> None:
+        """Hold issue/renew for Retry-After. Busy defaults to 30 s; 429 stays at 60 s."""
+        if result.error == "busy":
+            delay = _BUSY_RETRY_DEFAULT if result.retry_after is None else result.retry_after
+        else:
+            delay = result.retry_after or 60
+        self._set_rate_limit_locked(delay)
 
     def _set_rate_limit_locked(self, seconds: float) -> None:
         try:
@@ -1043,6 +1056,16 @@ def _interpret(response, action: str) -> Tuple[TokenResult, Optional[dict]]:
                 ok=False,
                 error="rate_limited",
                 retry_after=_retry_after_seconds(body, response),
+                status_code=status,
+            ),
+            None,
+        )
+    if status == 503 and error == "busy":
+        return (
+            TokenResult(
+                ok=False,
+                error="busy",
+                retry_after=_retry_after_seconds(body, response, default=_BUSY_RETRY_DEFAULT),
                 status_code=status,
             ),
             None,

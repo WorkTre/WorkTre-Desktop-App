@@ -23,12 +23,19 @@ import certifi
 from ..config import constants, settings
 from .preferences import get_blur_radius
 
-# The server cap is about 42 MB. 12 MB of base64 is a conservative backstop
-# so a multi-monitor capture is re-encoded before it gets near that cap.
-MAX_UPLOAD_BASE64_CHARS = 12 * 1024 * 1024
+# Live post_max_size is not known and may be PHP's default 8M. 6 MB of
+# base64 is a conservative backstop so a capture is re-encoded before upload.
+MAX_UPLOAD_BASE64_CHARS = 6 * 1024 * 1024
+# One retry after a size rejection, aimed under half of that backstop.
+SIZE_RETRY_BASE64_CHARS = 3 * 1024 * 1024
 JPEG_FALLBACK_QUALITY = 80
 MAX_DOWNSCALE_STEPS = 24
 MIN_DOWNSCALE_EDGE = 1
+_SIZE_ERROR_CODES = frozenset({
+    "too_large",
+    "payload_too_large",
+    "file_too_large",
+})
 _UPLOAD_LOG_CODES = frozenset({
     "invalid_credentials",
     "rate_limited",
@@ -37,6 +44,8 @@ _UPLOAD_LOG_CODES = frozenset({
     "token_invalid",
     "reauth_required",
     "too_large",
+    "payload_too_large",
+    "file_too_large",
 })
 
 
@@ -186,11 +195,13 @@ class ScreenshotManager:
                 fresh = self._recover_upload_token(user_id)
                 token = fresh
                 status, code = self._post_upload(user_id, b64_string, fresh, image_format)
-            if status == 413 and code == "too_large":
-                smaller = self._smaller_jpeg(b64_string)
+            if _size_rejected(status, code):
+                smaller = self._jpeg_under_retry_limit(b64_string)
                 if smaller:
+                    logged = code if code in _UPLOAD_LOG_CODES else "other"
                     self._log(
-                        f"Upload rejected as too_large at base64 size {len(b64_string)}; "
+                        f"Upload rejected status {status} code={logged} "
+                        f"at base64 size {len(b64_string)}; "
                         f"retrying JPEG base64 size {len(smaller)}"
                     )
                     status, code = self._post_upload(user_id, smaller, token, "JPEG")
@@ -271,8 +282,8 @@ class ScreenshotManager:
         shrunk = self._downscale_until_fit(image, limit, jpeg_b64)
         return shrunk, "JPEG"
 
-    def _smaller_jpeg(self, rejected_b64: str) -> Optional[str]:
-        """One smaller JPEG after HTTP 413 too_large. Not used for HTTP 400."""
+    def _jpeg_under_retry_limit(self, rejected_b64: str) -> Optional[str]:
+        """One JPEG downscaled to SIZE_RETRY_BASE64_CHARS after a size rejection."""
         if not PIL_AVAILABLE:
             self._log("Cannot shrink a rejected screenshot", "error")
             return None
@@ -284,14 +295,14 @@ class ScreenshotManager:
                 "error",
             )
             return None
+        limit = SIZE_RETRY_BASE64_CHARS
         jpeg_b64 = _encode_jpeg_base64(image, JPEG_FALLBACK_QUALITY)
-        if len(jpeg_b64) < len(rejected_b64):
+        if len(jpeg_b64) > limit:
+            jpeg_b64 = self._downscale_until_fit(image, limit, jpeg_b64)
+        if not jpeg_b64 or jpeg_b64 == rejected_b64:
+            return None
+        if len(jpeg_b64) <= limit or len(jpeg_b64) < len(rejected_b64):
             return jpeg_b64
-        shrunk = self._downscale_until_fit(
-            image, max(1, len(rejected_b64) // 2), jpeg_b64
-        )
-        if shrunk and len(shrunk) < len(rejected_b64):
-            return shrunk
         return None
 
     def _downscale_until_fit(self, image, limit: int, jpeg_b64: str) -> str:
@@ -362,10 +373,20 @@ class ScreenshotManager:
         raw_code = _upload_error_code(response)
         logged = raw_code if raw_code in _UPLOAD_LOG_CODES else ("other" if raw_code else "-")
         self._log(f"Upload status {response.status_code} code={logged}")
-        # 400 is a final refusal. Only 401 (token) and 413 (too_large) are acted on.
+        # Token refresh uses 401. A size retry uses 413, or a 400 whose code
+        # names a size reject. Any other 400 is final.
         if response.status_code in (401, 413):
             return response.status_code, raw_code
+        if response.status_code == 400 and raw_code in _SIZE_ERROR_CODES:
+            return response.status_code, raw_code
         return response.status_code, None
+
+
+def _size_rejected(status, code) -> bool:
+    """HTTP 413, or HTTP 400 with a size error code. One retry, then stop."""
+    if status == 413:
+        return True
+    return status == 400 and code in _SIZE_ERROR_CODES
 
     def upload_async(self, user_id: str, callback: Optional[callable] = None):
         """Upload screenshot asynchronously."""

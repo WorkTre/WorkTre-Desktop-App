@@ -13,7 +13,7 @@ Product name on the device: **WorkTre App** (not “agent” or “monitor”).
 | Shift timer & breaks | On | Matches company shift rules |
 | Idle / away time | On | When the employee steps away |
 | Activity heartbeat (~5 min) | On | Powers “online / idle / stale” on the dashboard |
-| Screenshots | **Company-controlled** | Only if the employer enables them for that user. Upload is form-encoded and includes a desk token in the body when the app has one. Captures over 12 MB of base64 are re-encoded as JPEG and downscaled |
+| Screenshots | **Company-controlled** | Only if the employer enables them for that user. Upload is form-encoded and includes a desk token in the body when the app has one. Captures over 6 MB of base64 are re-encoded as JPEG and downscaled |
 | App / URL tracking | **Off** | Not enabled |
 
 Heartbeats may queue offline and sync when the device reconnects, so hours are not silently lost.

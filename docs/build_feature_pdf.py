@@ -362,7 +362,7 @@ def build():
         "Completed idle windows (start + end) are sent on the heartbeat.",
         "Heartbeat (~5 minutes) powers online / idle / stale on the web dashboard.",
         "Offline queue — heartbeats sync when the network returns.",
-        "Screenshots only if the company enables them; all monitors; blur before upload (Off / Light / Medium / Strong). Oversized shots are re-encoded as JPEG under 12 MB.",
+        "Screenshots only if the company enables them; all monitors; blur before upload (Off / Light / Medium / Strong). Oversized shots are re-encoded as JPEG under 6 MB.",
         "Employee acknowledges screenshot consent. App / URL tracking is not enabled.",
     ], styles))
 
