@@ -7,6 +7,7 @@ POST body only. Attendance callers must treat every failure as non-fatal.
 
 import json
 import logging
+import math
 import os
 import socket
 import threading
@@ -197,6 +198,8 @@ def _retry_after_seconds(body: Any, response, default: float = 60.0) -> float:
     except (TypeError, ValueError):
         seconds = None
     if seconds is not None:
+        if not math.isfinite(seconds):
+            return _cap_retry_after(default)
         return _cap_retry_after(seconds)
     if isinstance(raw, str):
         try:

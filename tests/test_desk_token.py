@@ -1351,7 +1351,10 @@ class TestQaFixes:
         def fake_unprotect(data, entropy):
             calls.append(entropy)
             if entropy is not None:
-                raise dpapi.DpapiError("no entropy on this blob")
+                raise dpapi.DpapiError(
+                    "no entropy on this blob",
+                    winerror=dpapi.ERROR_INVALID_DATA,
+                )
             return b"plain"
 
         def fake_protect(data, entropy):
@@ -1368,6 +1371,44 @@ class TestQaFixes:
         assert calls[0] == dpapi.APP_ENTROPY
         assert calls[1] is None
         assert calls[2] == ("protect", dpapi.APP_ENTROPY)
+
+    def test_transient_dpapi_error_does_not_retry_or_delete(self, tmp_path, monkeypatch):
+        real_status = dpapi.unprotect_status
+        _use_xor_dpapi(monkeypatch)
+        manager = security.SecurityManager(base_dir=str(tmp_path))
+        assert manager.save_credentials("ada@example.com", PASSWORD) is True
+        path = tmp_path / constants.DPAPI_CREDENTIALS_FILE
+        calls = []
+
+        def fake_unprotect(data, entropy):
+            calls.append(entropy)
+            if entropy is not None:
+                raise dpapi.DpapiError("CryptUnprotectData failed (winerror=1722)", winerror=1722)
+            raise dpapi.DpapiError("CryptUnprotectData failed (winerror=13)", winerror=13)
+
+        monkeypatch.setattr(dpapi, "unprotect_status", real_status)
+        monkeypatch.setattr(dpapi, "is_available", lambda: True)
+        monkeypatch.setattr(dpapi, "_unprotect_windows", fake_unprotect)
+        assert manager.load_credentials() is None
+        assert calls == [dpapi.APP_ENTROPY]
+        assert path.exists()
+
+    def test_non_finite_retry_after_uses_the_default(self, tmp_path, logger, monkeypatch):
+        route(monkeypatch, lambda url, data, kwargs: FakeResponse(
+            429, {"error": "rate_limited"}, headers={"Retry-After": "nan"}
+        ))
+        manager = make_manager(tmp_path, logger)
+        result = manager.issue("ada", PASSWORD)
+        assert result.error == "rate_limited"
+        assert result.retry_after == 60
+
+        route(monkeypatch, lambda url, data, kwargs: FakeResponse(
+            503, {"error": "busy"}, headers={"Retry-After": "inf"}
+        ))
+        manager._blocked_until = 0
+        busy = manager.issue("ada", PASSWORD)
+        assert busy.error == "busy"
+        assert busy.retry_after == 30
 
     def test_503_busy_honours_retry_after_without_backoff_or_notice(
         self, tmp_path, logger, monkeypatch

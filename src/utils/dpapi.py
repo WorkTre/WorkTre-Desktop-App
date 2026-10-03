@@ -115,7 +115,11 @@ def unprotect_status(data):
     blob = bytes(data)
     try:
         return _unprotect_windows(blob, APP_ENTROPY), False
-    except DpapiError:
+    except DpapiError as exc:
+        # A legacy blob fails with invalid-data. Any other error is temporary:
+        # do not retry, or a later invalid-data result would delete a good file.
+        if not error_is_corrupt_data(exc):
+            raise
         return _unprotect_windows(blob, None), True
 
 

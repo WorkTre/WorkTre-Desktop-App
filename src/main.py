@@ -702,7 +702,7 @@ class WorkTreApp:
         """Login to WorkTre - Returns plain object."""
         try:
             import traceback
-            print(f"🔐 JSApi.login called for user: {username}")
+            print("🔐 JSApi.login called")
 
             # Ensure API client is initialized
             if not self.api_client:
@@ -1351,7 +1351,7 @@ class JSApi:
     def login(self, username: str, password: str) -> Dict[str, Any]:
         """Login to WorkTre - Returns plain object."""
         try:
-            print(f"🔐 JSApi.login called for user: {username}")
+            print("🔐 JSApi.login called")
             result = self._app.login(username, password)
             print(f"📤 Login result from app: {result}")
 
@@ -1717,7 +1717,7 @@ class JSApi:
     def handle_forget_password(self, email: str) -> Dict[str, Any]:
         """Handle forgot password."""
         try:
-            self._app.logger.info(f"Forgot password requested for: {email}")
+            self._app.logger.info("Forgot password requested")
             return {"status": True}
         except Exception as e:
             self._app.logger.error(f"Forgot password error: {e}")
