@@ -7,6 +7,7 @@ import requests
 import socket
 import json
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 import time
 import certifi
 from typing import Dict, Any, Optional, List, Tuple
@@ -213,7 +214,9 @@ class SOAPClient:
         """
         param_xml = ''
         for key, value in parameters.items():
-            param_xml += f'<{key}>{value}</{key}>\n'
+            # Keys are fixed literals. Values are escaped so &, <, and > stay well-formed.
+            # NuSOAP decodes the entities and receives the original text.
+            param_xml += f'<{key}>{escape(str(value))}</{key}>\n'
 
         return f'''<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
