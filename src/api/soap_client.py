@@ -7,6 +7,17 @@ import requests
 import socket
 import json
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
+
+
+def _soap_value(value) -> str:
+    """Escape a SOAP value and drop characters XML 1.0 cannot encode."""
+    kept = []
+    for char in str(value):
+        code = ord(char)
+        if code in (9, 10, 13) or code >= 32:
+            kept.append(char)
+    return escape("".join(kept))
 import time
 import certifi
 from typing import Dict, Any, Optional, List, Tuple
@@ -213,7 +224,9 @@ class SOAPClient:
         """
         param_xml = ''
         for key, value in parameters.items():
-            param_xml += f'<{key}>{value}</{key}>\n'
+            # Keys are fixed literals. Values are escaped so &, <, and > stay well-formed.
+            # NuSOAP decodes the entities and receives the original text.
+            param_xml += f'<{key}>{_soap_value(value)}</{key}>\n'
 
         return f'''<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope 
@@ -299,7 +312,8 @@ class SOAPClient:
             self._user_info = result
             self._logged_in = True
 
-            self.logger.info(f"Login successful for user: {username}")
+            employee_id = result.get("EID") or result.get("eid") or "-"
+            self.logger.info("Login successful for employee %s" % employee_id)
             return {
                 "status": True,
                 "data": result,

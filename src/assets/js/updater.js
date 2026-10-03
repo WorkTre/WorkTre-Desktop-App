@@ -97,6 +97,38 @@ function processMessage(message) {
                 window.onInternetDisconnectedTimeExceed();
             }
             break;
+        case 'desk_token_reauth':
+            showDeskTokenNotice(message.data && message.data.message);
+            break;
+    }
+}
+
+/**
+ * Non-blocking reminder that screenshot linking needs a fresh sign-in.
+ * Attendance is unaffected.
+ */
+function showDeskTokenNotice(text) {
+    const noticeText = text || 'Please sign in again so screenshots stay linked to your account. Attendance is still running.';
+    let el = document.getElementById('desk-token-reauth-notice');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'desk-token-reauth-notice';
+        el.setAttribute('role', 'status');
+        el.style.cssText = 'position:fixed;bottom:16px;right:16px;max-width:380px;z-index:99999;background:#002f34;color:#fff;padding:12px 16px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.25);font:14px Segoe UI,sans-serif;display:flex;align-items:center;gap:12px;';
+        const copy = document.createElement('span');
+        copy.id = 'desk-token-reauth-text';
+        const close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = 'Dismiss';
+        close.style.cssText = 'background:#01a78d;color:#fff;border:0;border-radius:4px;padding:4px 8px;cursor:pointer;';
+        close.addEventListener('click', function () { el.remove(); });
+        el.appendChild(copy);
+        el.appendChild(close);
+        document.body.appendChild(el);
+    }
+    const copy = document.getElementById('desk-token-reauth-text');
+    if (copy) {
+        copy.textContent = noticeText;
     }
 }
 

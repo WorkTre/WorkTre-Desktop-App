@@ -632,13 +632,77 @@ class WorkTreApp:
         self.logger.warning("Network disconnection timeout triggered")
         self.state.message_queue.add_message("disconnect_logout", {})
 
+    # ==================== DESK TOKEN ====================
+
+    def _desk_token_manager(self):
+        """Shared token manager. Failures here must not affect attendance."""
+        from src.utils.desk_token import get_token_manager
+        manager = get_token_manager(self.logger)
+        manager.set_reauth_handler(self._notify_desk_reauth)
+        if self.app_version:
+            manager.set_app_version(self.app_version)
+        return manager
+
+    def _notify_desk_reauth(self):
+        """Non-blocking notice. Attendance keeps running with tokenless uploads."""
+        message = (
+            "Please sign in again so screenshots stay linked to your account. "
+            "Attendance is still running."
+        )
+        try:
+            if self.notification_manager:
+                self.notification_manager.show_warning("WorkTre sign-in needed", message, 8)
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token notice failed: {e}")
+        try:
+            self.state.message_queue.add_message("desk_token_reauth", {"message": message})
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token notice queue failed: {e}")
+
+    def _issue_desk_token_async(self, username: str, password: str, employee_id):
+        try:
+            manager = self._desk_token_manager()
+            manager.set_session(employee_id, username)
+            manager.issue_async(
+                username,
+                password,
+                reset_rejection=True,
+                ignore_backoff=True,
+            )
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token issue was not scheduled: {e}")
+
+    def _crash_desk_token_async(self, employee_id):
+        try:
+            self._desk_token_manager().crash_login_async(employee_id)
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token crash setup was not scheduled: {e}")
+
+    def _maintain_desk_token_async(self):
+        try:
+            self._desk_token_manager().maintain_async()
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token maintenance was not scheduled: {e}")
+
+    def _revoke_desk_token(self):
+        try:
+            self._desk_token_manager().revoke_async()
+        except Exception as e:
+            if self.logger:
+                self.logger.error(f"Desk token revoke was not scheduled: {e}")
+
     # ==================== AUTHENTICATION ====================
 
     def login(self, username: str, password: str) -> Dict[str, Any]:
         """Login to WorkTre - Returns plain object."""
         try:
             import traceback
-            print(f"🔐 JSApi.login called for user: {username}")
+            print("🔐 JSApi.login called")
 
             # Ensure API client is initialized
             if not self.api_client:
@@ -661,6 +725,8 @@ class WorkTreApp:
 
                 # Lock window size after successful login
                 self.lock_window_size()
+                # Desk token is best-effort and must not delay or fail login.
+                self._issue_desk_token_async(username, password, self.state.current_user)
 
             return response
         except Exception as e:
@@ -729,12 +795,15 @@ class WorkTreApp:
 
         self.logger.info(f"Logging out user: {self.state.current_user}")
 
-        response = self.api_client.logout(
-            self.state.current_user,
-            eod,
-            total_chats,
-            total_billable_chats
-        )
+        try:
+            response = self.api_client.logout(
+                self.state.current_user,
+                eod,
+                total_chats,
+                total_billable_chats
+            )
+        finally:
+            self._revoke_desk_token()
 
         self.state.is_logged_in = False
         self.state.current_user = None
@@ -807,7 +876,7 @@ class WorkTreApp:
 
                         if not result or (not result.get("status") and not result.get("skipped")):
                             try:
-                                from .utils.activity_queue import get_activity_queue
+                                from src.utils.activity_queue import get_activity_queue
                                 get_activity_queue(APP_NAME, self.logger).enqueue(
                                     self.state.current_user, "False", idle_start, idle_end
                                 )
@@ -820,6 +889,9 @@ class WorkTreApp:
                                 self.state.user_info.get("ScreenShotStatus") == "1"):
                             self._take_screenshot()
 
+                        # Renew the desk token from this keep-alive. Never blocks it.
+                        self._maintain_desk_token_async()
+
                 self.state.interval_timer = threading.Timer(
                     self.state.repeat_interval_seconds,
                     self._on_interval_complete
@@ -831,7 +903,7 @@ class WorkTreApp:
         if not self.api_client or not self.state.is_logged_in:
             return
         try:
-            from .utils.activity_queue import get_activity_queue
+            from src.utils.activity_queue import get_activity_queue
             queue = get_activity_queue(APP_NAME, self.logger)
 
             def _send(user_id, break_flag, idle_start, idle_end):
@@ -1004,6 +1076,8 @@ class JSApi:
             # You'll need to implement this in your api_client
             if hasattr(self._app.api_client, 'crash_login'):
                 result = self._app.api_client.crash_login(eid, crash_reason, break_flag)
+                if isinstance(result, dict) and result.get("status"):
+                    self._app._crash_desk_token_async(eid)
                 return result
             else:
                 # Mock response if not implemented
@@ -1073,6 +1147,7 @@ class JSApi:
         """Clear application data on logout"""
         try:
             print("🔄 Clearing app data")
+            self._app._revoke_desk_token()
             self._app.state.is_logged_in = False
             self._app.state.current_user = None
             self._app.state.user_info = None
@@ -1152,6 +1227,7 @@ class JSApi:
         """Handle logout due to inactivity"""
         try:
             print(f"🔄 Logout due to inactivity for user: {eid}")
+            self._app._revoke_desk_token()
             if hasattr(self._app, 'api_client') and self._app.api_client:
                 result = self._app.api_client.logout_inactivity(eid)
                 
@@ -1275,7 +1351,7 @@ class JSApi:
     def login(self, username: str, password: str) -> Dict[str, Any]:
         """Login to WorkTre - Returns plain object."""
         try:
-            print(f"🔐 JSApi.login called for user: {username}")
+            print("🔐 JSApi.login called")
             result = self._app.login(username, password)
             print(f"📤 Login result from app: {result}")
 
@@ -1486,7 +1562,7 @@ class JSApi:
                     idle_end
                 )
                 if not result or (not result.get("status") and not result.get("skipped")):
-                    from .utils.activity_queue import get_activity_queue
+                    from src.utils.activity_queue import get_activity_queue
                     get_activity_queue(APP_NAME, self._app.logger).enqueue(
                         self._app.state.current_user, break_flag, idle_start, idle_end
                     )
@@ -1547,9 +1623,9 @@ class JSApi:
     def get_privacy_settings(self) -> Dict[str, Any]:
         """Return local privacy settings + what WorkTre App tracks."""
         try:
-            from .utils.preferences import get_preferences
-            from .utils.activity_queue import get_activity_queue
-            from .config import settings as app_settings
+            from src.utils.preferences import get_preferences
+            from src.utils.activity_queue import get_activity_queue
+            from src.config import settings as app_settings
 
             prefs = get_preferences(APP_NAME)
             user_info = self._app.state.user_info or {}
@@ -1606,7 +1682,7 @@ class JSApi:
     def save_privacy_settings(self, preferences: Dict[str, Any] = None) -> Dict[str, Any]:
         """Save local privacy preferences (blur, consent, etc.)."""
         try:
-            from .utils.preferences import save_preferences, get_preferences
+            from src.utils.preferences import save_preferences, get_preferences
             if preferences is None:
                 preferences = {}
             ok = save_preferences(preferences, APP_NAME)
@@ -1618,7 +1694,7 @@ class JSApi:
     def acknowledge_trust_notice(self, screenshot_consent: bool = False) -> Dict[str, Any]:
         """Record monitoring / screenshot consent from the trust notice."""
         try:
-            from .utils.preferences import save_preferences, get_preferences
+            from src.utils.preferences import save_preferences, get_preferences
             payload = {"monitoring_notice_acked": True}
             if screenshot_consent:
                 payload["screenshot_consent_acked"] = True
@@ -1641,7 +1717,7 @@ class JSApi:
     def handle_forget_password(self, email: str) -> Dict[str, Any]:
         """Handle forgot password."""
         try:
-            self._app.logger.info(f"Forgot password requested for: {email}")
+            self._app.logger.info("Forgot password requested")
             return {"status": True}
         except Exception as e:
             self._app.logger.error(f"Forgot password error: {e}")
