@@ -23,10 +23,21 @@ import certifi
 from ..config import constants, settings
 from .preferences import get_blur_radius
 
-# Server caps the upload body near 16 MB. 12 MB of base64 leaves room for
-# form percent-encoding without crossing that cap.
+# The server cap is about 42 MB. 12 MB of base64 is a conservative backstop
+# so a multi-monitor capture is re-encoded before it gets near that cap.
 MAX_UPLOAD_BASE64_CHARS = 12 * 1024 * 1024
 JPEG_FALLBACK_QUALITY = 80
+MAX_DOWNSCALE_STEPS = 24
+MIN_DOWNSCALE_EDGE = 1
+_UPLOAD_LOG_CODES = frozenset({
+    "invalid_credentials",
+    "rate_limited",
+    "bad_request",
+    "token_expired",
+    "token_invalid",
+    "reauth_required",
+    "too_large",
+})
 
 
 def _upload_error_code(response) -> Optional[str]:
@@ -169,11 +180,20 @@ class ScreenshotManager:
                 self._log("Screenshot upload skipped after the size check", "error")
                 return False
             b64_string, image_format = fitted
-            token = self._current_upload_token()
+            token = self._current_upload_token(user_id)
             status, code = self._post_upload(user_id, b64_string, token, image_format)
             if status == 401 and code in ("token_invalid", "token_expired"):
-                fresh = self._recover_upload_token()
+                fresh = self._recover_upload_token(user_id)
+                token = fresh
                 status, code = self._post_upload(user_id, b64_string, fresh, image_format)
+            if status == 413 and code == "too_large":
+                smaller = self._smaller_jpeg(b64_string)
+                if smaller:
+                    self._log(
+                        f"Upload rejected as too_large at base64 size {len(b64_string)}; "
+                        f"retrying JPEG base64 size {len(smaller)}"
+                    )
+                    status, code = self._post_upload(user_id, smaller, token, "JPEG")
             if status == 200:
                 self._log(f"Screenshot uploaded successfully for user {user_id}")
                 return True
@@ -187,23 +207,23 @@ class ScreenshotManager:
             self._log(f"Upload failed: {type(e).__name__}", "error")
             return False
 
-    def _current_upload_token(self) -> Optional[str]:
+    def _current_upload_token(self, user_id) -> Optional[str]:
         manager = self._token_api()
         if manager is None:
             return None
         try:
-            token = manager.get_upload_token()
+            token = manager.get_upload_token(user_id)
         except Exception:
             return None
         self._last_token = token
         return token
 
-    def _recover_upload_token(self) -> Optional[str]:
+    def _recover_upload_token(self, user_id) -> Optional[str]:
         manager = self._token_api()
         if manager is None:
             return None
         try:
-            token = manager.recover_after_rejected_token()
+            token = manager.recover_after_rejected_token(user_id)
         except Exception:
             token = None
         self._last_token = token
@@ -249,33 +269,53 @@ class ScreenshotManager:
             f"downscaling from {image.size[0]}x{image.size[1]}"
         )
         shrunk = self._downscale_until_fit(image, limit, jpeg_b64)
-        if shrunk is None:
-            return None
         return shrunk, "JPEG"
 
-    def _downscale_until_fit(self, image, limit: int, jpeg_b64: str) -> Optional[str]:
-        """Shrink `image` proportionally until its JPEG base64 fits `limit`."""
+    def _smaller_jpeg(self, rejected_b64: str) -> Optional[str]:
+        """One smaller JPEG after HTTP 413 too_large. Not used for HTTP 400."""
+        if not PIL_AVAILABLE:
+            self._log("Cannot shrink a rejected screenshot", "error")
+            return None
+        try:
+            image = _image_from_base64(rejected_b64)
+        except Exception:
+            self._log(
+                f"Cannot read rejected screenshot; base64 size {len(rejected_b64)}",
+                "error",
+            )
+            return None
+        jpeg_b64 = _encode_jpeg_base64(image, JPEG_FALLBACK_QUALITY)
+        if len(jpeg_b64) < len(rejected_b64):
+            return jpeg_b64
+        shrunk = self._downscale_until_fit(
+            image, max(1, len(rejected_b64) // 2), jpeg_b64
+        )
+        if shrunk and len(shrunk) < len(rejected_b64):
+            return shrunk
+        return None
+
+    def _downscale_until_fit(self, image, limit: int, jpeg_b64: str) -> str:
+        """Shrink until the JPEG fits, then send the smallest result either way."""
         resample = _jpeg_resample()
         width, height = image.size
         aspect = (height / float(width)) if width else 1.0
         seen = set()
-        while len(jpeg_b64) > limit:
-            if width <= 1 and height <= 1:
-                self._log(
-                    f"Screenshot base64 size {len(jpeg_b64)} still exceeds {limit} "
-                    f"at {width}x{height}",
-                    "error",
-                )
-                return None
+        steps = 0
+        while len(jpeg_b64) > limit and steps < MAX_DOWNSCALE_STEPS:
+            if width <= MIN_DOWNSCALE_EDGE and height <= MIN_DOWNSCALE_EDGE:
+                break
+            steps += 1
             scale = (limit / float(len(jpeg_b64))) ** 0.5
             # Stay under 1 so each pass actually shrinks, including when JPEG
             # overhead dwarfs the pixel count.
             scale = min(0.85, max(0.25, scale * 0.9))
-            new_w = max(1, int(width * scale))
-            new_h = max(1, int(round(new_w * aspect)))
+            new_w = max(MIN_DOWNSCALE_EDGE, int(width * scale))
+            new_h = max(MIN_DOWNSCALE_EDGE, int(round(new_w * aspect)))
             if (new_w, new_h) == (width, height) or (new_w, new_h) in seen:
-                new_w = max(1, width // 2)
-                new_h = max(1, int(round(new_w * aspect)))
+                new_w = max(MIN_DOWNSCALE_EDGE, width // 2)
+                new_h = max(MIN_DOWNSCALE_EDGE, int(round(new_w * aspect)))
+            if (new_w, new_h) == (width, height):
+                break
             seen.add((new_w, new_h))
             self._log(
                 f"Downscaling screenshot from {width}x{height} to {new_w}x{new_h}, "
@@ -287,14 +327,11 @@ class ScreenshotManager:
             width, height = image.size
             jpeg_b64 = _encode_jpeg_base64(image, JPEG_FALLBACK_QUALITY)
             self._log(f"Downscaled screenshot base64 size {len(jpeg_b64)} at {width}x{height}")
-            if len(seen) > 24:
-                break
         if len(jpeg_b64) > limit:
             self._log(
-                f"Screenshot base64 size {len(jpeg_b64)} still exceeds {limit}",
-                "error",
+                f"Sending smallest screenshot base64 size {len(jpeg_b64)} "
+                f"at {width}x{height} after {steps} steps"
             )
-            return None
         return jpeg_b64
 
     def _post_upload(self, user_id: str, b64_string: str, token: Optional[str],
@@ -322,11 +359,13 @@ class ScreenshotManager:
             verify=(certifi.where() if settings.VERIFY_SSL else False),
             allow_redirects=False,
         )
-        code = None
-        if response.status_code == 401:
-            code = _upload_error_code(response)
-        self._log(f"Upload status {response.status_code} code={code or '-'}")
-        return response.status_code, code
+        raw_code = _upload_error_code(response)
+        logged = raw_code if raw_code in _UPLOAD_LOG_CODES else ("other" if raw_code else "-")
+        self._log(f"Upload status {response.status_code} code={logged}")
+        # 400 is a final refusal. Only 401 (token) and 413 (too_large) are acted on.
+        if response.status_code in (401, 413):
+            return response.status_code, raw_code
+        return response.status_code, None
 
     def upload_async(self, user_id: str, callback: Optional[callable] = None):
         """Upload screenshot asynchronously."""
