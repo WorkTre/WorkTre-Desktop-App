@@ -17,6 +17,52 @@ class DpapiUnavailable(Exception):
 class DpapiError(Exception):
     """CryptProtectData or CryptUnprotectData failed."""
 
+    def __init__(self, message="", winerror=None):
+        super().__init__(message)
+        if winerror is None:
+            winerror = _winerror_from_text(message)
+        self.winerror = winerror
+
+
+def _winerror_from_text(message):
+    text = str(message)
+    marker = "winerror="
+    start = text.find(marker)
+    if start < 0:
+        return None
+    digits = []
+    for char in text[start + len(marker):]:
+        if char.isdigit() or (char == "-" and not digits):
+            digits.append(char)
+        else:
+            break
+    if not digits or digits == ["-"]:
+        return None
+    try:
+        return int("".join(digits))
+    except ValueError:
+        return None
+
+
+# Corrupt ciphertext. Transient failures (profile, RPC) use other codes.
+ERROR_INVALID_DATA = 13
+NTE_BAD_DATA = 0x80090005
+CORRUPT_DATA_WINERRORS = frozenset({ERROR_INVALID_DATA, NTE_BAD_DATA})
+
+
+def error_is_corrupt_data(exc) -> bool:
+    """True only for a bad blob, not for a temporary DPAPI outage."""
+    code = getattr(exc, "winerror", None)
+    if code is None:
+        return False
+    try:
+        code = int(code)
+    except (TypeError, ValueError):
+        return False
+    if code < 0:
+        code = code & 0xFFFFFFFF
+    return code in CORRUPT_DATA_WINERRORS
+
 
 # Do not pop a Windows UI if the key material cannot be used.
 CRYPTPROTECT_UI_FORBIDDEN = 0x01
@@ -129,7 +175,8 @@ def _protect_windows(data: bytes, entropy) -> bytes:
         ctypes.byref(out_blob),
     )
     if not ok:
-        raise DpapiError(f"CryptProtectData failed (winerror={ctypes.get_last_error()})")
+        code = ctypes.get_last_error()
+        raise DpapiError(f"CryptProtectData failed (winerror={code})", winerror=code)
     try:
         return _copy_out_blob(out_blob)
     finally:
@@ -163,7 +210,8 @@ def _unprotect_windows(data: bytes, entropy) -> bytes:
         ctypes.byref(out_blob),
     )
     if not ok:
-        raise DpapiError(f"CryptUnprotectData failed (winerror={ctypes.get_last_error()})")
+        code = ctypes.get_last_error()
+        raise DpapiError(f"CryptUnprotectData failed (winerror={code})", winerror=code)
     try:
         return _copy_out_blob(out_blob)
     finally:

@@ -650,6 +650,8 @@ class TestUpload:
             if url == constants.DESK_TOKEN_ISSUE_URL:
                 assert data["password"] == PASSWORD
                 return FakeResponse(200, ok_body(OTHER_TOKEN, employee_id=42))
+            if url == constants.DESK_TOKEN_REVOKE_URL:
+                return FakeResponse(200, {"status": "ok"})
             uploads.append(dict(data))
             if len(uploads) == 1:
                 return FakeResponse(401, {"code": "token_expired"})
@@ -1250,7 +1252,7 @@ class TestQaFixes:
         manager._record = None
         assert manager.revoke().ok
         assert seen["token"] == TOKEN
-        assert seen["still_stored"] is True
+        assert seen["still_stored"] is False
         assert manager._store._memory is None
         assert manager.get_upload_token() is None
 
@@ -1322,7 +1324,7 @@ class TestQaFixes:
         assert path.exists()
 
         def broken(data):
-            raise dpapi.DpapiError("bad blob")
+            raise dpapi.DpapiError("CryptUnprotectData failed (winerror=13)", winerror=13)
 
         monkeypatch.setattr(dpapi, "unprotect_status", broken)
         assert manager.load_credentials() is None
@@ -1526,6 +1528,30 @@ class TestQaFixes:
         assert posted[0]["format"] == "JPEG"
         assert len(posted[0]["file"]) > 1
         assert "smallest" in logger.text
+
+    def test_take_screenshot_and_queue_call_upload(self, tmp_path, logger, monkeypatch):
+        called = []
+
+        def fake_upload(self, user_id, *args, **kwargs):
+            called.append(user_id)
+            return True
+
+        monkeypatch.setattr(screenshot.time, "sleep", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr(ScreenshotManager, "upload", fake_upload)
+        monkeypatch.setattr(screenshot, "_screenshot_manager", None)
+        assert screenshot.take_screenshot("7") is True
+        deadline = time.time() + 2
+        while called != ["7"] and time.time() < deadline:
+            time.sleep(0.02)
+        assert called == ["7"]
+
+        manager = screenshot.get_screenshot_manager()
+        manager.queue_upload("9")
+        deadline = time.time() + 2
+        while called != ["7", "9"] and time.time() < deadline:
+            time.sleep(0.02)
+        assert called == ["7", "9"]
+        manager.stop()
 
 
 def self_manager(tmp_path, logger):

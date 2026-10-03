@@ -381,13 +381,6 @@ class ScreenshotManager:
             return response.status_code, raw_code
         return response.status_code, None
 
-
-def _size_rejected(status, code) -> bool:
-    """HTTP 413, or HTTP 400 with a size error code. One retry, then stop."""
-    if status == 413:
-        return True
-    return status == 400 and code in _SIZE_ERROR_CODES
-
     def upload_async(self, user_id: str, callback: Optional[callable] = None):
         """Upload screenshot asynchronously."""
         def _upload_thread():
@@ -428,6 +421,13 @@ def _size_rejected(status, code) -> bool:
         self._running = False
         if self._upload_thread:
             self._upload_thread.join(timeout=2)
+
+
+def _size_rejected(status, code) -> bool:
+    """HTTP 413, or HTTP 400 with a size error code. One retry, then stop."""
+    if status == 413:
+        return True
+    return status == 400 and code in _SIZE_ERROR_CODES
 
 
 # ==================== CONVENIENCE FUNCTIONS ====================

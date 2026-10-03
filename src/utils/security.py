@@ -242,8 +242,16 @@ class SecurityManager:
         except OSError:
             print("Could not read saved credentials")
             return None
-        except (dpapi.DpapiError, dpapi.DpapiUnavailable, json.JSONDecodeError,
-                UnicodeError, ValueError, TypeError):
+        except dpapi.DpapiUnavailable:
+            print("Could not read saved credentials")
+            return None
+        except dpapi.DpapiError as exc:
+            # RPC / profile failures must leave remember_me.dpapi in place.
+            if delete_on_definite_failure and dpapi.error_is_corrupt_data(exc):
+                print("Could not decrypt saved credentials")
+                self._delete_file(self._dpapi_path)
+            return None
+        except (json.JSONDecodeError, UnicodeError, ValueError, TypeError):
             if delete_on_definite_failure:
                 print("Could not decrypt saved credentials")
                 self._delete_file(self._dpapi_path)

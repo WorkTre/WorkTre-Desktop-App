@@ -41,6 +41,7 @@ _NO_FAILURE_BACKOFF = frozenset({
     "superseded",
     "backoff",
     "employee_mismatch",
+    "logged_out",
 })
 # 503 busy holds the same local window as a 429. It is not an outage backoff.
 _RETRY_HOLD_ERRORS = frozenset({"rate_limited", "busy"})
@@ -190,26 +191,37 @@ def _retry_after_seconds(body: Any, response, default: float = 60.0) -> float:
         headers = getattr(response, "headers", {}) or {}
         raw = headers.get("Retry-After")
     if raw is None or raw == "":
-        return default
+        return _cap_retry_after(default)
     try:
         seconds = float(raw)
     except (TypeError, ValueError):
         seconds = None
     if seconds is not None:
-        if seconds < 0:
-            return 0.0
-        return seconds
+        return _cap_retry_after(seconds)
     if isinstance(raw, str):
         try:
             when = parsedate_to_datetime(raw.strip())
         except (TypeError, ValueError, IndexError, OverflowError):
-            return default
+            return _cap_retry_after(default)
         if when is None:
-            return default
+            return _cap_retry_after(default)
         if when.tzinfo is None:
             when = when.replace(tzinfo=timezone.utc)
-        return max(0.0, when.timestamp() - time.time())
-    return default
+        return _cap_retry_after(when.timestamp() - time.time())
+    return _cap_retry_after(default)
+
+
+def _cap_retry_after(seconds: float) -> float:
+    """Honour Retry-After, but never hold longer than one hour."""
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        return 60.0
+    if seconds < 0:
+        return 0.0
+    if seconds > float(constants.HOUR):
+        return float(constants.HOUR)
+    return seconds
 
 
 def _assert_url_has_no_secrets(url: str) -> None:
@@ -327,6 +339,7 @@ class TokenManager:
         self._failure_backoff_seconds = 0.0
         self._employee_id: Optional[str] = None
         self._signed_in_username: Optional[str] = None
+        self._session_active = True
         self._issue_inflight = False
         self._inflight_employee_id: Optional[str] = None
         self._credentials_rejected = False
@@ -342,6 +355,7 @@ class TokenManager:
     def set_session(self, employee_id, username=None) -> None:
         """Bind later token calls to the signed-in employee and username."""
         with self._lock:
+            self._session_active = True
             if employee_id not in (None, ""):
                 self._employee_id = str(employee_id)
             if username is not None:
@@ -368,6 +382,8 @@ class TokenManager:
         """Token for this upload, only when its employee id matches ``user_id``."""
         try:
             with self._lock:
+                if not self._session_active:
+                    return None
                 current = self._usable_token_locked(self._record, user_id)
                 if current:
                     return current
@@ -375,6 +391,8 @@ class TokenManager:
             if not loaded:
                 return None
             with self._lock:
+                if not self._session_active:
+                    return None
                 current = self._usable_token_locked(self._record, user_id)
                 if current:
                     return current
@@ -394,11 +412,16 @@ class TokenManager:
         app_version: Optional[str] = None,
         reset_rejection: bool = False,
         ignore_backoff: bool = False,
+        generation: Optional[int] = None,
     ) -> TokenResult:
         """POST /desktoken/issue. Does not retry. Manual login sets ``ignore_backoff``."""
         if not username or not password:
             return TokenResult(ok=False, error="bad_request")
         with self._lock:
+            if not self._session_active:
+                return TokenResult(ok=False, error="logged_out")
+            if generation is None:
+                generation = self._generation
             seen = (self._record or {}).get("token")
         with self._mutation_lock:
             with self._lock:
@@ -413,6 +436,7 @@ class TokenManager:
                     reset_rejection,
                     ignore_backoff,
                     seen,
+                    generation,
                 )
             finally:
                 with self._lock:
@@ -427,8 +451,11 @@ class TokenManager:
         reset_rejection,
         ignore_backoff,
         seen,
+        generation,
     ) -> TokenResult:
         with self._lock:
+            if not self._session_active:
+                return TokenResult(ok=False, error="logged_out")
             if reset_rejection:
                 self._credentials_rejected = False
                 self._reauth_notice_sent = False
@@ -452,7 +479,6 @@ class TokenManager:
                     token=current,
                     employee_id=(self._record or {}).get("employee_id"),
                 )
-            generation = self._generation
         fields = {"username": username, "password": password}
         computer = computer_name if computer_name is not None else self._computer_name_value()
         version = app_version if app_version is not None else self._app_version_value()
@@ -461,17 +487,24 @@ class TokenManager:
         if version:
             fields["app_version"] = version
         result, record = self._call("issue", constants.DESK_TOKEN_ISSUE_URL, fields)
-        return self._finish_mutation(result, record, generation, invalid_sets_rejection=True)
+        return self._finish_mutation(
+            result, record, generation, invalid_sets_rejection=True, revoke_replaced=True
+        )
 
     def renew(self) -> TokenResult:
         """POST /desktoken/renew. The server cancels the previous token."""
         with self._lock:
+            if not self._session_active:
+                return TokenResult(ok=False, error="logged_out")
             seen = (self._record or {}).get("token")
+            generation = self._generation
         with self._mutation_lock:
-            return self._renew_holding(seen)
+            return self._renew_holding(seen, generation)
 
-    def _renew_holding(self, seen) -> TokenResult:
+    def _renew_holding(self, seen, generation) -> TokenResult:
         with self._lock:
+            if not self._session_active:
+                return TokenResult(ok=False, error="logged_out")
             if self._rate_limited_locked():
                 return TokenResult(
                     ok=False,
@@ -485,7 +518,6 @@ class TokenManager:
                     retry_after=self._failure_remaining_locked(),
                 )
             current = (self._record or {}).get("token")
-            generation = self._generation
             employee_id = (self._record or {}).get("employee_id")
         if seen and current and current != seen:
             return TokenResult(ok=True, token=current, employee_id=employee_id)
@@ -495,10 +527,23 @@ class TokenManager:
         return self._finish_mutation(result, record, generation, invalid_sets_rejection=False)
 
     def revoke(self) -> TokenResult:
-        """Revoke the stored token on the server, then delete the local copy."""
+        """Clear the local session immediately, then revoke the captured token."""
+        token = self._begin_logout()
+        return self._revoke_captured(token)
+
+    def revoke_async(self) -> None:
+        """Clear the local session now, and revoke the captured token in the background."""
+        token = self._begin_logout()
+        threading.Thread(
+            target=self._revoke_captured_background,
+            args=(token,),
+            name="desk-token-revoke",
+            daemon=True,
+        ).start()
+
+    def _begin_logout(self) -> Optional[str]:
+        """Drop memory, disk, and the signed-in session. Return the token to revoke."""
         with self._lock:
-            limited = self._rate_limited_locked()
-            retry_after = self._retry_remaining_locked()
             token = (self._record or {}).get("token")
             if not token:
                 try:
@@ -507,25 +552,29 @@ class TokenManager:
                     loaded = None
                 if loaded and loaded.get("token"):
                     token = loaded.get("token")
-                    self._record = loaded
+            self._clear_locked()
+            self._session_active = False
+            self._employee_id = None
+            self._signed_in_username = None
+            self._issue_inflight = False
+            return token
+
+    def _revoke_captured(self, token) -> TokenResult:
+        """POST revoke for ``token`` only. Never clears whatever is current."""
         if not token:
-            with self._lock:
-                self._clear_locked()
             return TokenResult(ok=True)
-        if limited:
-            return TokenResult(ok=False, error="rate_limited", retry_after=retry_after)
-        result, _record = self._call("revoke", constants.DESK_TOKEN_REVOKE_URL, {"token": token})
         with self._lock:
-            current = (self._record or {}).get("token")
-            if current in (None, token):
-                self._clear_locked()
-            if result.error in _RETRY_HOLD_ERRORS:
+            if self._rate_limited_locked():
+                return TokenResult(
+                    ok=False,
+                    error="rate_limited",
+                    retry_after=self._retry_remaining_locked(),
+                )
+        result, _record = self._call("revoke", constants.DESK_TOKEN_REVOKE_URL, {"token": token})
+        if result.error in _RETRY_HOLD_ERRORS:
+            with self._lock:
                 self._remember_retry_locked(result)
         return result
-
-    def revoke_async(self) -> None:
-        """Revoke without blocking logout."""
-        threading.Thread(target=self._revoke_background, name="desk-token-revoke", daemon=True).start()
 
     def issue_async(
         self,
@@ -535,9 +584,11 @@ class TokenManager:
         ignore_backoff: bool = False,
     ) -> None:
         """Issue after SOAP login. Returns immediately."""
+        with self._lock:
+            generation = self._generation
         threading.Thread(
             target=self._issue_background,
-            args=(username, password, reset_rejection, ignore_backoff),
+            args=(username, password, reset_rejection, ignore_backoff, generation),
             name="desk-token-issue",
             daemon=True,
         ).start()
@@ -598,6 +649,8 @@ class TokenManager:
         """Renew inside the lead window. Never raises. Does not sleep."""
         try:
             with self._lock:
+                if not self._session_active:
+                    return TokenResult(ok=False, error="logged_out")
                 if self._rate_limited_locked():
                     return TokenResult(
                         ok=False,
@@ -628,6 +681,8 @@ class TokenManager:
         """
         try:
             with self._lock:
+                if not self._session_active:
+                    return None
                 if self._rate_limited_locked() or self._failure_limited_locked():
                     return None
                 sent = (self._record or {}).get("token")
@@ -674,6 +729,7 @@ class TokenManager:
         password: str,
         reset_rejection: bool,
         ignore_backoff: bool = False,
+        generation: Optional[int] = None,
     ) -> None:
         try:
             self.issue(
@@ -681,6 +737,7 @@ class TokenManager:
                 password,
                 reset_rejection=reset_rejection,
                 ignore_backoff=ignore_backoff,
+                generation=generation,
             )
         except Exception:
             self._log("background issue failed", "error")
@@ -701,14 +758,16 @@ class TokenManager:
         finally:
             self._maintain_gate.release()
 
-    def _revoke_background(self) -> None:
+    def _revoke_captured_background(self, token) -> None:
         try:
-            self.revoke()
+            self._revoke_captured(token)
         except Exception:
             self._log("revoke failed", "warning")
 
     def _issue_saved_quietly(self) -> TokenResult:
         with self._lock:
+            if not self._session_active:
+                return TokenResult(ok=False, error="logged_out")
             if self._failure_limited_locked():
                 return TokenResult(
                     ok=False,
@@ -810,6 +869,7 @@ class TokenManager:
         record: Optional[dict],
         generation: int,
         invalid_sets_rejection: bool,
+        revoke_replaced: bool = False,
     ) -> TokenResult:
         late_token = None
         with self._lock:
@@ -827,16 +887,21 @@ class TokenManager:
                         late_token = late
                 outcome = TokenResult(ok=False, error="superseded", status_code=result.status_code)
             elif success:
+                previous = (self._record or {}).get("token")
                 if not self._store_record_locked(record):
+                    late_token = record.get("token")
                     outcome = TokenResult(
                         ok=False,
                         error="employee_mismatch",
                         status_code=result.status_code,
                     )
                 else:
+                    stored = record.get("token")
+                    if revoke_replaced and previous and previous != stored:
+                        late_token = previous
                     self._credentials_rejected = False
                     self._reauth_notice_sent = False
-                    result.token = record.get("token")
+                    result.token = stored
                     result.employee_id = record.get("employee_id")
                     outcome = result
             else:
