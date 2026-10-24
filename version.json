@@ -1,1 +1,10 @@
-{"version":"2.2.3","required":false,"release_notes":"• Stability and inactivity fixes\n• Bug fixes","download_url":"https://worktre.com/downloads/WorkTreSetup-2.2.3.exe","windows":{"download_url":"https://worktre.com/downloads/WorkTreSetup-2.2.3.exe","checksum":"84b0b0313840bdefa39b979ece725f0b56dd8e1b11751a4b09b231738ae93dbc"}}
+{
+  "version": "2.2.4",
+  "required": false,
+  "release_notes": "• Company-local clocks and empty shifts show the wall time or Not set\n• A SOAP database or server outage returns to the login screen",
+  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.4/WorkTreInstaller.exe",
+  "windows": {
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.4/WorkTreInstaller.exe",
+    "checksum": "1ff25883a6684472c1bb002f4e4a60df59659d0d1a011d790280d638cb48baa8"
+  }
+}
