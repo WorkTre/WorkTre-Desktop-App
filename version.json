@@ -1,10 +1,10 @@
 {
-  "version": "2.2.4",
+  "version": "2.2.5",
   "required": false,
-  "release_notes": "• Company-local clocks and empty shifts show the wall time or Not set\n• A SOAP database or server outage returns to the login screen",
-  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.4/WorkTreInstaller.exe",
+  "release_notes": "• Shift, login and break times are shown correctly in your local time\n• An empty shift shows Not set\n• An open break shows Continue",
+  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.5/WorkTreInstaller.exe",
   "windows": {
-    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.4/WorkTreInstaller.exe",
-    "checksum": "1ff25883a6684472c1bb002f4e4a60df59659d0d1a011d790280d638cb48baa8"
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.5/WorkTreInstaller.exe",
+    "checksum": "5607b3a9f8728f455532e80b07ba6724ff1a43d9ca50abe1bbabe335cecdc49b"
   }
 }
