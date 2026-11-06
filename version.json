@@ -1,7 +1,7 @@
 {
   "version": "2.2.7",
   "required": false,
-  "release_notes": "\u2022 Fixes packaged login crash after a successful sign-in\n\u2022 Adds a Settings / privacy panel\n\u2022 Dcodia Inc. branding\n\u2022 Stricter Windows CI and frozen self-test",
+  "release_notes": "\u2022 Fixes packaged login crash after a successful sign-in\n\u2022 Adds a Settings / privacy panel\n\u2022 Dcodia Inc. branding\n\u2022 Stricter Windows CI and a frozen self-test",
   "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.7/WorkTreInstaller.exe",
   "windows": {
     "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.7/WorkTreInstaller.exe",
