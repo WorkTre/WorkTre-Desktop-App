@@ -1,10 +1,10 @@
 {
-  "version": "2.2.5",
+  "version": "2.2.7",
   "required": false,
-  "release_notes": "• Shift, login and break times are shown correctly in your local time\n• An empty shift shows Not set\n• An open break shows Continue",
-  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.5/WorkTreInstaller.exe",
+  "release_notes": "\u2022 Fixes packaged login crash after a successful sign-in\n\u2022 Adds a Settings / privacy panel\n\u2022 Dcodia Inc. branding\n\u2022 Stricter Windows CI and frozen self-test",
+  "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.7/WorkTreInstaller.exe",
   "windows": {
-    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.5/WorkTreInstaller.exe",
-    "checksum": "5607b3a9f8728f455532e80b07ba6724ff1a43d9ca50abe1bbabe335cecdc49b"
+    "download_url": "https://github.com/WorkTre/WorkTre-Desktop-App/releases/download/v2.2.7/WorkTreInstaller.exe",
+    "checksum": "8afd9c8a6f30ce01ee9c95354ae288a6d16d71d52033203b0dd800afd1ef9283"
   }
 }
